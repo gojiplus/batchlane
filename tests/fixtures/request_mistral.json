@@ -1,0 +1,15 @@
+{
+  "max_tokens": 64,
+  "messages": [
+    {
+      "content": "You classify text.",
+      "role": "system"
+    },
+    {
+      "content": "The product exceeded my expectations.",
+      "role": "user"
+    }
+  ],
+  "model": "mistral-small-latest",
+  "temperature": 0.2
+}

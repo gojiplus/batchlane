@@ -1,0 +1,23 @@
+{
+  "contents": [
+    {
+      "parts": [
+        {
+          "text": "The product exceeded my expectations."
+        }
+      ],
+      "role": "user"
+    }
+  ],
+  "generationConfig": {
+    "max_output_tokens": 64,
+    "temperature": 0.2
+  },
+  "system_instruction": {
+    "parts": [
+      {
+        "text": "You classify text."
+      }
+    ]
+  }
+}

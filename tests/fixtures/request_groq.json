@@ -1,0 +1,16 @@
+{
+  "max_tokens": 64,
+  "messages": [
+    {
+      "content": "You classify text.",
+      "role": "system"
+    },
+    {
+      "content": "The product exceeded my expectations.",
+      "role": "user"
+    }
+  ],
+  "model": "llama-3.3-70b-versatile",
+  "stream": false,
+  "temperature": 0.2
+}

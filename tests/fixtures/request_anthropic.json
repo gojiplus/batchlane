@@ -1,0 +1,22 @@
+{
+  "max_tokens": 64,
+  "messages": [
+    {
+      "content": [
+        {
+          "text": "The product exceeded my expectations.",
+          "type": "text"
+        }
+      ],
+      "role": "user"
+    }
+  ],
+  "model": "claude-haiku-4-5-20251001",
+  "system": [
+    {
+      "text": "You classify text.",
+      "type": "text"
+    }
+  ],
+  "temperature": 0.2
+}
