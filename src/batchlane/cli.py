@@ -179,6 +179,37 @@ def _cmd_providers(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_serve(args: argparse.Namespace) -> int:
+    """Run the OpenAI-compatible gateway.
+
+    Args:
+        args: Parsed arguments.
+
+    Returns:
+        Process exit status.
+
+    Raises:
+        BatchlaneError: If the optional server extras are not installed.
+    """
+    try:
+        import uvicorn
+    except ImportError as exc:
+        raise BatchlaneError(
+            "The gateway needs the optional server extras. Install with "
+            "'pip install batchlane[serve]'."
+        ) from exc
+
+    from .gateway import build_app
+
+    print(  # noqa: T201 - a CLI
+        f"batchlane gateway on http://{args.host}:{args.port}/v1 -- point an "
+        f"OpenAI client's base_url here",
+        file=sys.stderr,
+    )
+    uvicorn.run(build_app(Path(args.storage)), host=args.host, port=args.port)
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Construct the argument parser.
 
@@ -218,6 +249,14 @@ def build_parser() -> argparse.ArgumentParser:
 
     providers = sub.add_parser("providers", help="list reachable batch lanes")
     providers.set_defaults(func=_cmd_providers)
+
+    serve = sub.add_parser(
+        "serve", help="run an OpenAI-compatible batch endpoint over every lane"
+    )
+    serve.add_argument("--host", default="127.0.0.1")
+    serve.add_argument("--port", type=int, default=8000)
+    serve.add_argument("--storage", default="batchlane-gateway")
+    serve.set_defaults(func=_cmd_serve)
     return parser
 
 

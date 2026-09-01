@@ -114,6 +114,40 @@ bl.cancel(handle)
 bl.list_jobs("groq")
 ```
 
+## Your existing OpenAI batch code, pointed anywhere
+
+```bash
+pip install 'batchlane[serve]'
+batchlane serve
+```
+
+```python
+import openai
+
+client = openai.OpenAI(base_url="http://localhost:8000/v1", api_key="unused")
+
+f = client.files.create(file=open("rows.jsonl", "rb"), purpose="batch")
+batch = client.batches.create(
+    input_file_id=f.id, endpoint="/v1/chat/completions", completion_window="24h"
+)
+```
+
+Nothing above is batchlane-specific. It is the stock OpenAI SDK, and the rows
+name `groq/...` or `gemini/...` models, so the batch runs on a provider the
+client has never heard of. An R, JavaScript or curl client works the same way:
+change `base_url` and nothing else. The test suite proves this by driving the
+real `openai` package against the app rather than a client of our own.
+
+**The gateway stores no jobs.** OpenAI's protocol is already state-passing at
+the client boundary, so the `batch_id` carries the compressed handles rather
+than pointing at a row: one process, no database, no migrations, nothing lost
+on restart. Uploaded files do go to disk, because a file must survive until a
+batch references it, and a job past roughly 200 chunks spills its handles to
+disk because the id would no longer fit in a URL. `GET /v1/batches` returns an
+empty list, since a server holding nothing has nothing to enumerate.
+
+A solo user never has to run any of this; the library alone is enough.
+
 ## What it will not do
 
 ### It does not emulate a batch
