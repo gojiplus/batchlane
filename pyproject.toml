@@ -119,6 +119,9 @@ link_ignore = [
     # A placeholder host on an httpx.Request built only to satisfy litellm's
     # response-transform signature; it is never sent anywhere.
     "https://batchlane.local/*",
+    # RFC 2606 reserves .invalid precisely so it never resolves; used for the
+    # mock signed URLs a Fireworks results fetch goes through.
+    "https://*.invalid/*",
 ]
 src_layout = true
 tests_at_root = true

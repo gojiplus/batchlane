@@ -25,6 +25,12 @@ IDS = list(bl.supported_providers())
 ADAPTERS = [bl.get_adapter(p) for p in IDS]
 
 
+@pytest.fixture(autouse=True)
+def _account(monkeypatch):
+    """Fireworks scopes every URL to an account; the others ignore this."""
+    monkeypatch.setenv("FIREWORKS_ACCOUNT_ID", "test-account")
+
+
 @pytest.mark.parametrize("adapter", ADAPTERS, ids=IDS)
 def test_every_adapter_has_a_descriptor_naming_itself(adapter):
     assert adapter.capabilities.provider in bl.supported_providers()
@@ -74,8 +80,11 @@ def test_list_matches_what_the_descriptor_claims(adapter):
         return_value=httpx.Response(
             200,
             json={
+                # A union of every list-response shape our providers use, so
+                # one fixture serves them all.
                 "data": [{"id": "job_1"}],
                 "operations": [{"name": "batches/job_1"}],
+                "batchInferenceJobs": [{"name": "accounts/a/batchInferenceJobs/job_1"}],
             },
         )
     )
@@ -201,9 +210,10 @@ def test_an_adapter_that_claims_to_stamp_a_key_actually_sends_it(adapter):
         key="bl-sentinel-0",
     )
     sent = b"".join(call.request.content for call in respx.calls)
-    assert b"bl-sentinel-0" in sent, (
+    urls = "".join(str(call.request.url) for call in respx.calls).encode()
+    assert b"bl-sentinel-0" in sent + urls, (
         f"{adapter.capabilities.provider} declares stamps_key but the key never "
-        f"reached the wire"
+        f"reached the wire, in the body or the URL"
     )
 
 

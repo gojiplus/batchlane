@@ -159,9 +159,14 @@ def _cmd_providers(args: argparse.Namespace) -> int:
 
     for name in supported_providers():
         caps = capabilities_for(name)
-        window = (
-            "/".join(caps.window.allowed) if caps and caps.window else "provider-set"
-        )
+        if not caps or caps.window is None:
+            window = "provider-set"
+        elif caps.window.allowed:
+            window = "/".join(caps.window.allowed)
+        else:
+            # An empty allowed tuple means unconstrained, not forbidden: these
+            # lanes take an integer hour count rather than a fixed enum.
+            window = f"any (default {caps.window.default})"
         # Notes carry real caveats (allowlists, excluded models) and vary a
         # lot in length, so they take the last column rather than a padded
         # middle one that only lines up for the short ones.

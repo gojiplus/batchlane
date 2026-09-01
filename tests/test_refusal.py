@@ -31,8 +31,10 @@ def test_unshipped_adapter_is_not_reported_as_a_missing_lane():
 
 
 def test_planned_provider_says_planned_not_absent():
+    # A lane that exists and we have not built: the error must say so rather
+    # than claim the provider has none.
     with pytest.raises(AdapterNotShippedError):
-        bl.get_adapter("fireworks_ai")
+        bl.get_adapter("azure")
 
 
 def test_empty_batch_refused():

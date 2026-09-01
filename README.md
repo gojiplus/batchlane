@@ -116,8 +116,8 @@ rate limits and a 24-hour window. So it refuses, and says why:
 >>> bl.get_adapter("openrouter")
 NoBatchLaneError: 'openrouter' has no asynchronous batch lane: It resells
 upstream capacity at retail, so it has no idle fleet to backfill and cannot
-price a discount lane. Providers with a lane: anthropic, deepinfra, gemini,
-groq, mistral, openai, together_ai.
+price a discount lane. Providers with a lane: anthropic, deepinfra,
+fireworks_ai, gemini, groq, mistral, openai, together_ai.
 ```
 
 A provider whose lane exists but is unimplemented gets a *different* error, so
@@ -136,6 +136,7 @@ No spend gates and no estimates. Use the gateway you already have for that.
 | OpenAI | 50% | 24h | no | the reference lane; litellm covers it too |
 | Groq | 50% | 24h or 7d | no | model allowlist |
 | Mistral | 50% | any Nh | no | model scoped to the job, not the line |
+| Fireworks | 50% | 12h to 72h | no | dataset upload; no cancel endpoint |
 | Together | up to 50% | 24h fixed | no | some models excluded from batch |
 | DeepInfra | 20% | 24h | no | model must be uniform across the file |
 
@@ -151,11 +152,14 @@ about the output looks wrong.
 
 ## What is missing, and why
 
-Fireworks is planned. xAI is skipped on purpose: its lane
+xAI is skipped on purpose: its lane
 discounts 20% rather than 50%, and its own docs exclude the flagship models.
 
 Azure, Vertex AI and Bedrock are unshipped because litellm already reaches
 them, so batchlane points you there instead of claiming they have no lane.
+
+With Fireworks the open-weight sweep is complete: Groq, Together, DeepInfra
+and Fireworks are all reachable, and no other package batches any of them.
 
 Self-hosted runtimes get a different answer again. Ollama, LM Studio,
 llamafile and vLLM have no batch lane because there is no per-token price to

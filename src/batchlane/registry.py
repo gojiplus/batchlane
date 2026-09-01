@@ -6,6 +6,7 @@ import os
 from typing import TYPE_CHECKING
 
 from .adapters.anthropic import AnthropicAdapter
+from .adapters.fireworks import FireworksAdapter
 from .adapters.gemini import GeminiAdapter
 from .adapters.mistral import MistralAdapter
 from .adapters.openai_shaped import ROWS, OpenAIShapedAdapter
@@ -24,6 +25,7 @@ _BESPOKE: dict[str, type[BatchAdapter]] = {
     "anthropic": AnthropicAdapter,
     "gemini": GeminiAdapter,
     "mistral": MistralAdapter,
+    "fireworks_ai": FireworksAdapter,
 }
 
 _ENV_VARS: dict[str, tuple[str, ...]] = {
