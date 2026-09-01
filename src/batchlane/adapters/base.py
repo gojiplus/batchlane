@@ -10,17 +10,24 @@ it, and LiteLLM's dispatcher never routes to it for cancel or list regardless.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, ClassVar
 
 from ..errors import CapabilityNotSupportedError, MixedModelBatchError
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
+    from datetime import datetime
 
     from ..capabilities import LaneCapabilities
     from ..handle import BatchHandle, BatchLine, JobStatus, RequestResult
 
-__all__ = ["BatchAdapter"]
+__all__ = ["KEY_FIELD", "BatchAdapter"]
+
+#: Where a submission key is stamped on the provider's own job object, so a
+#: job submitted just before a crash can be found again instead of paid for
+#: twice. No provider offers an idempotency key for batch, so this is the
+#: client-side substitute: a natural key plus reconciliation.
+KEY_FIELD = "batchlane_key"
 
 
 class BatchAdapter(ABC):
@@ -30,6 +37,12 @@ class BatchAdapter(ABC):
     #: several providers via a data row.
     capabilities: LaneCapabilities
 
+    #: Whether the provider accepts a client-settable label on the batch, so a
+    #: submission key can be stamped and found again after a crash. False only
+    #: for Anthropic, whose create body takes nothing but ``requests``; that
+    #: lane recovers through a weaker, and explicitly fallible, match instead.
+    stamps_key: ClassVar[bool] = True
+
     @abstractmethod
     def submit(
         self,
@@ -38,6 +51,7 @@ class BatchAdapter(ABC):
         endpoint: str,
         window: str | None,
         api_key: str,
+        key: str | None = None,
     ) -> BatchHandle:
         """Submit a batch and return a receipt.
 
@@ -46,10 +60,42 @@ class BatchAdapter(ABC):
             endpoint: Which endpoint the lines target.
             window: Requested turnaround, or None for the provider default.
             api_key: Credential for this provider.
+            key: A submission key to stamp on the provider's job, so a crash
+                between submitting and recording can be reconciled rather than
+                resubmitted.
 
         Returns:
             A handle that can poll and collect the job.
         """
+
+    def find_submitted(
+        self,
+        key: str,
+        *,
+        api_key: str,
+        expected_rows: int,
+        since: datetime,
+    ) -> BatchHandle | None:
+        """Find a job carrying this submission key, for crash recovery.
+
+        The default matches on the stamped key, which is exact. A provider
+        with nowhere to stamp one overrides this.
+
+        Args:
+            key: The submission key recorded before submitting.
+            api_key: Credential for this provider.
+            expected_rows: How many rows the chunk held, for providers that
+                can only match approximately.
+            since: When the submission was attempted.
+
+        Returns:
+            The handle if the job was found, otherwise None.
+        """
+        del expected_rows, since
+        for handle in self.list_jobs(limit=100, api_key=api_key):
+            if handle.extra.get(KEY_FIELD) == key:
+                return handle
+        return None
 
     @abstractmethod
     def payload_bytes(self, lines: Sequence[BatchLine], *, endpoint: str) -> int:

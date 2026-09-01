@@ -2,12 +2,14 @@
 
 import dataclasses
 import json
+from datetime import UTC, datetime
 
 import httpx
 import pytest
 import respx
 
 import batchlane as bl
+from batchlane import runner
 from batchlane.adapters.openai_shaped import ROWS
 from batchlane.capabilities import CAPABILITIES
 
@@ -306,7 +308,75 @@ def test_the_checkpoint_records_what_was_submitted_not_the_results(groq_key, tmp
     _mock_one_job(["r0", "r1"])
     checkpoint = tmp_path / "job.jsonl"
     list(bl.run(_lines(2), checkpoint=checkpoint, poll_interval=0))
-    record = json.loads(checkpoint.read_text().splitlines()[0])
-    assert set(record) == {"chunk", "custom_ids", "handle"}
-    assert record["handle"]["job_id"] == "b1"
+    lines = [json.loads(x) for x in checkpoint.read_text().splitlines()]
+    # Two records per chunk, in this order: the intent, written before the
+    # provider is called, then the receipt once it answers. The order is the
+    # mechanism -- reversed, a crash mid-submit would leave no trace.
+    intent, receipt = lines[0], lines[1]
+    assert set(intent) == {"chunk", "key", "at"}
+    assert intent["key"].startswith("bl-")
+    assert set(receipt) == {"chunk", "custom_ids", "handle"}
+    assert receipt["handle"]["job_id"] == "b1"
     assert "response" not in checkpoint.read_text()
+
+
+@respx.mock
+def test_polling_backs_off_instead_of_hammering_a_job_that_runs_for_hours(
+    groq_key, monkeypatch
+):
+    # A six-hour job at a fixed 30s is 720 polls per chunk that learn nothing.
+    slept: list[float] = []
+    monkeypatch.setattr(runner.time, "sleep", slept.append)
+    respx.get(f"{GROQ.base_url}/batches/b1").mock(
+        side_effect=[httpx.Response(200, json={"id": "b1", "status": "in_progress"})]
+        * 6
+        + [httpx.Response(200, json={"id": "b1", "status": "completed"})]
+    )
+    handle = bl.BatchHandle(
+        provider="groq",
+        job_id="b1",
+        endpoint="chat.completions",
+        lane="batch_file",
+        created_at=bl.handle.utcnow(),
+    )
+    bl.wait(handle, poll_interval=30)
+
+    assert slept == sorted(slept), "intervals must not shrink"
+    assert slept[-1] > slept[0], "the interval must actually grow"
+    assert max(slept) <= runner._BACKOFF_CAP_SECONDS, "and must stay capped"
+
+
+@respx.mock
+def test_anthropic_refuses_to_guess_when_recovery_is_ambiguous(monkeypatch):
+    # Anthropic gives a batch no label, so recovery matches on creation time
+    # and row count. When two batches fit, adopting one risks collecting
+    # someone else's answers; resubmitting risks paying twice. Neither is
+    # acceptable silently.
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "k")
+    adapter = bl.get_adapter("anthropic")
+    respx.get("https://api.anthropic.com/v1/messages/batches").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "data": [
+                    {
+                        "id": "msgbatch_a",
+                        "created_at": "2026-09-01T12:00:00+00:00",
+                        "request_counts": {"processing": 2},
+                    },
+                    {
+                        "id": "msgbatch_b",
+                        "created_at": "2026-09-01T12:00:01+00:00",
+                        "request_counts": {"processing": 2},
+                    },
+                ]
+            },
+        )
+    )
+    with pytest.raises(bl.BatchlaneError, match="Refusing to guess"):
+        adapter.find_submitted(
+            "bl-x-0",
+            api_key="k",
+            expected_rows=2,
+            since=datetime(2026, 9, 1, 11, 0, tzinfo=UTC),
+        )

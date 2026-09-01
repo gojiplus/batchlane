@@ -19,7 +19,7 @@ from .._http import request
 from ..capabilities import CAPABILITIES
 from ..handle import BatchHandle, BatchLine, JobStatus, RequestResult, State, utcnow
 from ..translate import encode_body
-from .base import BatchAdapter
+from .base import KEY_FIELD, BatchAdapter
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
@@ -160,6 +160,7 @@ class OpenAIShapedAdapter(BatchAdapter):
         endpoint: str,
         window: str | None,
         api_key: str,
+        key: str | None = None,
     ) -> BatchHandle:
         """Upload the JSONL and create the batch job.
 
@@ -168,6 +169,7 @@ class OpenAIShapedAdapter(BatchAdapter):
             endpoint: Which endpoint the lines target.
             window: Requested turnaround, or None for the provider default.
             api_key: Credential for this provider.
+            key: Submission key, stamped into the job's metadata.
 
         Returns:
             A handle for the created job.
@@ -190,6 +192,8 @@ class OpenAIShapedAdapter(BatchAdapter):
             "completion_window": window
             or (caps.window.default if caps.window else "24h"),
         }
+        if key is not None:
+            body["metadata"] = {KEY_FIELD: key}
         job = request(
             "POST",
             f"{self.row.base_url}{self.row.batches_path}",
@@ -204,7 +208,11 @@ class OpenAIShapedAdapter(BatchAdapter):
             lane="batch_file",
             created_at=utcnow(),
             model=None,
-            extra={"input_file_id": upload["id"]},
+            extra=(
+                {"input_file_id": upload["id"], KEY_FIELD: key}
+                if key is not None
+                else {"input_file_id": upload["id"]}
+            ),
         )
 
     def status(self, handle: BatchHandle, *, api_key: str) -> JobStatus:
@@ -299,7 +307,10 @@ class OpenAIShapedAdapter(BatchAdapter):
                 lane="batch_file",
                 created_at=utcnow(),
                 model=None,
-                extra={"input_file_id": job.get("input_file_id") or ""},
+                extra={
+                    "input_file_id": job.get("input_file_id") or "",
+                    KEY_FIELD: (job.get("metadata") or {}).get(KEY_FIELD, ""),
+                },
             )
 
     def cancel(self, handle: BatchHandle, *, api_key: str) -> None:

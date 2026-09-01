@@ -13,9 +13,12 @@ rather than merely save typing.
 
 from __future__ import annotations
 
+import hashlib
 import json
+import os
 import time
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -37,6 +40,31 @@ __all__ = ["ChunkPlan", "answer_text", "map", "plan", "run", "wait"]
 _SAFETY = 0.9
 
 DEFAULT_POLL_SECONDS = 30.0
+
+#: Batch jobs run for hours, and nothing changes in the first few minutes, so
+#: a fixed interval spends thousands of polls learning nothing. Escalate and
+#: cap. A six-hour job costs about 30 polls here instead of 720.
+_BACKOFF_CAP_SECONDS = 900.0
+_BACKOFF_FACTOR = 2.0
+
+
+def _chunk_key(lines: Sequence[BatchLine], index: int) -> str:
+    """Derive a stable submission key from a chunk's content.
+
+    Deterministic, so resubmitting the same work produces the same key and a
+    job left behind by a crash can be recognised. No provider offers an
+    idempotency key for batch, so this is the client-side stand-in.
+
+    Args:
+        lines: The chunk's requests.
+        index: Which chunk this is within the job.
+
+    Returns:
+        A key short enough for a provider label field.
+    """
+    material = "|".join(f"{line.custom_id}:{line.model}" for line in lines)
+    digest = hashlib.sha256(material.encode()).hexdigest()[:16]
+    return f"bl-{digest}-{index}"
 
 
 @dataclass(frozen=True, slots=True)
@@ -171,7 +199,9 @@ def wait(
 
     Args:
         handle: The receipt from :func:`~batchlane.submit`.
-        poll_interval: Seconds between polls.
+        poll_interval: Seconds before the first re-poll. The interval then
+            doubles up to a fifteen-minute cap, since a job measured in hours
+            reveals nothing by being asked every thirty seconds.
         timeout: Give up after this many seconds, or None to wait indefinitely.
         api_key: Credential, or None to read it from the environment.
 
@@ -184,6 +214,7 @@ def wait(
     from . import status as _status
 
     deadline = None if timeout is None else time.monotonic() + timeout
+    interval = poll_interval
     while True:
         current = _status(handle, api_key=api_key)
         if current.is_terminal:
@@ -194,28 +225,61 @@ def wait(
                 f"{current.raw_state!r} after {timeout}s. The job is not lost; "
                 f"poll it again with this handle."
             )
-        time.sleep(poll_interval)
+        time.sleep(interval)
+        interval = min(interval * _BACKOFF_FACTOR, _BACKOFF_CAP_SECONDS)
 
 
-def _read_checkpoint(path: Path) -> dict[int, BatchHandle]:
-    """Load previously submitted chunk handles.
+def _read_checkpoint(
+    path: Path,
+) -> tuple[dict[int, BatchHandle], dict[int, tuple[str, datetime]]]:
+    """Load recorded handles and any unfinished submission intents.
 
     Args:
         path: Checkpoint file, which may not exist yet.
 
     Returns:
-        A mapping of chunk index to its handle.
+        A ``(handles, intents)`` pair keyed by chunk index. An intent with no
+        matching handle means a submission may have reached the provider
+        before the process stopped, so that chunk must be looked for rather
+        than resubmitted.
     """
     if not path.exists():
-        return {}
+        return {}, {}
     handles: dict[int, BatchHandle] = {}
+    intents: dict[int, tuple[str, datetime]] = {}
     for raw in path.read_text().splitlines():
-        if raw.strip():
-            record = json.loads(raw)
+        if not raw.strip():
+            continue
+        record = json.loads(raw)
+        if "handle" in record:
             handles[record["chunk"]] = BatchHandle.from_json(
                 json.dumps(record["handle"])
             )
-    return handles
+        elif "key" in record:
+            intents[record["chunk"]] = (
+                record["key"],
+                datetime.fromisoformat(record["at"]),
+            )
+    return handles, {i: v for i, v in intents.items() if i not in handles}
+
+
+def _append_intent(path: Path, index: int, key: str) -> None:
+    """Record that a chunk is about to be submitted.
+
+    Written and fsynced *before* the provider is called. No provider offers an
+    idempotency key for batch, so this record is the only evidence that a job
+    may exist after a crash mid-submission.
+
+    Args:
+        path: Checkpoint file.
+        index: Which chunk this is.
+        key: The submission key stamped on the provider's job.
+    """
+    record = {"chunk": index, "key": key, "at": datetime.now(UTC).isoformat()}
+    with path.open("a") as fh:
+        fh.write(json.dumps(record) + "\n")
+        fh.flush()
+        os.fsync(fh.fileno())
 
 
 def _append_checkpoint(
@@ -274,16 +338,44 @@ def run(
 
     chunking = plan(lines, endpoint=endpoint)
     path = Path(checkpoint) if checkpoint else None
-    known = _read_checkpoint(path) if path else {}
+    known, intents = _read_checkpoint(path) if path else ({}, {})
 
     for index, chunk in enumerate(chunking.chunks):
         handle = known.get(index)
         if handle is None:
-            handle = adapter.submit(
-                list(chunk), endpoint=endpoint, window=window, api_key=key
-            )
-            if path is not None:
-                _append_checkpoint(path, index, handle, [ln.custom_id for ln in chunk])
+            chunk_key = _chunk_key(chunk, index)
+
+            # An intent with no handle means the previous run may have
+            # submitted this chunk and stopped before recording it. The
+            # provider has no idempotency key to dedupe on, so look for the
+            # job before spending on it again.
+            prior = intents.get(index)
+            if prior is not None:
+                handle = adapter.find_submitted(
+                    prior[0],
+                    api_key=key,
+                    expected_rows=len(chunk),
+                    since=prior[1],
+                )
+                if handle is not None and path is not None:
+                    _append_checkpoint(
+                        path, index, handle, [ln.custom_id for ln in chunk]
+                    )
+
+            if handle is None:
+                if path is not None:
+                    _append_intent(path, index, chunk_key)
+                handle = adapter.submit(
+                    list(chunk),
+                    endpoint=endpoint,
+                    window=window,
+                    api_key=key,
+                    key=chunk_key,
+                )
+                if path is not None:
+                    _append_checkpoint(
+                        path, index, handle, [ln.custom_id for ln in chunk]
+                    )
 
         final = wait(handle, poll_interval=poll_interval, timeout=timeout, api_key=key)
         yield from _pairs(adapter, handle, final, chunk, by_id, key)

@@ -21,10 +21,12 @@ LiteLLM can retrieve an Anthropic batch but cannot create one -- it raises
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING, Any
+from datetime import datetime
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from .._http import request
 from ..capabilities import CAPABILITIES
+from ..errors import BatchlaneError
 from ..handle import BatchHandle, JobStatus, RequestResult, State, utcnow
 from ..translate import decode_response, encode_body
 from .base import BatchAdapter
@@ -46,6 +48,10 @@ DEFAULT_MAX_TOKENS = 1024
 
 class AnthropicAdapter(BatchAdapter):
     """Batch lane for Anthropic's Message Batches API."""
+
+    #: Anthropic's create body accepts only ``requests``: no label, no
+    #: metadata, nothing to stamp. See find_submitted for what replaces it.
+    stamps_key: ClassVar[bool] = False
 
     def __init__(self) -> None:
         """Bind the adapter to Anthropic's capability descriptor."""
@@ -111,6 +117,7 @@ class AnthropicAdapter(BatchAdapter):
         endpoint: str,
         window: str | None,
         api_key: str,
+        key: str | None = None,
     ) -> BatchHandle:
         """Create the batch. No upload step -- requests go inline.
 
@@ -119,10 +126,15 @@ class AnthropicAdapter(BatchAdapter):
             endpoint: Which endpoint the lines target.
             window: Must be None; Anthropic accepts no window parameter.
             api_key: Anthropic API key.
+            key: Accepted for interface parity and deliberately unused. The
+                create body takes only ``requests`` -- there is no label,
+                metadata or identifier field to stamp it on -- so recovery
+                goes through :meth:`find_submitted` instead.
 
         Returns:
             A handle for the created job.
         """
+        del key  # nowhere to put it; see find_submitted
         self.check(lines, endpoint=endpoint, window=window)
         job = request(
             "POST",
@@ -137,6 +149,73 @@ class AnthropicAdapter(BatchAdapter):
             lane="batch_inline",
             created_at=utcnow(),
             # Model is per-line here, so the job carries none.
+            model=None,
+            extra={},
+        )
+
+    def find_submitted(
+        self,
+        key: str,
+        *,
+        api_key: str,
+        expected_rows: int,
+        since: datetime,
+    ) -> BatchHandle | None:
+        """Find a possibly-submitted batch, without a key to match on.
+
+        Anthropic's create body accepts only ``requests``, so there is no
+        stamp to look for. The available signals are creation time and row
+        count, which together are suggestive but not unique. When more than
+        one batch fits, this raises rather than choosing: adopting the wrong
+        job and paying twice are both worse than an error naming the
+        ambiguity.
+
+        Args:
+            key: The submission key, unused here beyond the error message.
+            api_key: Anthropic API key.
+            expected_rows: How many requests the chunk held.
+            since: When the submission was attempted.
+
+        Returns:
+            The single matching handle, or None if nothing matches.
+
+        Raises:
+            BatchlaneError: If several batches match and none can be ruled out.
+        """
+        candidates = []
+        page = request(
+            "GET", BASE_URL, headers=self._headers(api_key), params={"limit": 100}
+        ).json()
+        for job in page.get("data") or []:
+            counts = job.get("request_counts") or {}
+            total = sum(
+                counts.get(k) or 0
+                for k in ("processing", "succeeded", "errored", "canceled", "expired")
+            )
+            created = job.get("created_at")
+            if total != expected_rows or not created:
+                continue
+            if datetime.fromisoformat(created) >= since:
+                candidates.append(job["id"])
+
+        if not candidates:
+            return None
+        if len(candidates) > 1:
+            raise BatchlaneError(
+                f"Anthropic gives a batch no field to label, so a submission "
+                f"interrupted before it was recorded cannot be identified "
+                f"exactly. {len(candidates)} batches created after "
+                f"{since:%Y-%m-%d %H:%M:%S} hold {expected_rows} requests: "
+                f"{', '.join(candidates)}. "
+                f"Collect the right one with batchlane.status() on its id, or "
+                f"cancel the strays, then rerun. Refusing to guess (key={key})."
+            )
+        return BatchHandle(
+            provider="anthropic",
+            job_id=candidates[0],
+            endpoint="chat.completions",
+            lane="batch_inline",
+            created_at=utcnow(),
             model=None,
             extra={},
         )

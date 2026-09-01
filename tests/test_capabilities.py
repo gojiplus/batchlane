@@ -9,6 +9,7 @@ import pytest
 import respx
 
 import batchlane as bl
+from batchlane.adapters.base import BatchAdapter
 from batchlane.adapters.openai_shaped import ROWS, OpenAIShapedAdapter
 from batchlane.capabilities import (
     CAPABILITIES,
@@ -180,3 +181,36 @@ def test_an_unbuildable_endpoint_is_refused_before_any_upload(adapter):
             endpoint="embeddings",
             window=None,
         )
+
+
+@pytest.mark.parametrize("adapter", ADAPTERS, ids=IDS)
+@respx.mock
+def test_an_adapter_that_claims_to_stamp_a_key_actually_sends_it(adapter):
+    # Reconciliation after a crash depends entirely on the key reaching the
+    # provider. An adapter that quietly dropped it would still pass every
+    # other test and would resubmit paid-for work on the next resume.
+    if not adapter.stamps_key:
+        pytest.skip(f"{adapter.capabilities.provider} accepts no batch-level label")
+
+    respx.route().mock(return_value=httpx.Response(200, json={"id": "j", "name": "j"}))
+    adapter.submit(
+        [bl.BatchLine("r0", "m", [{"role": "user", "content": "x"}])],
+        endpoint="chat.completions",
+        window=None,
+        api_key="k",
+        key="bl-sentinel-0",
+    )
+    sent = b"".join(call.request.content for call in respx.calls)
+    assert b"bl-sentinel-0" in sent, (
+        f"{adapter.capabilities.provider} declares stamps_key but the key never "
+        f"reached the wire"
+    )
+
+
+@pytest.mark.parametrize("adapter", ADAPTERS, ids=IDS)
+def test_an_adapter_that_cannot_stamp_overrides_recovery(adapter):
+    # The default find_submitted matches on the stamped key, so an adapter
+    # that cannot stamp must supply its own recovery or it silently has none.
+    if adapter.stamps_key:
+        pytest.skip("uses the default key match")
+    assert type(adapter).find_submitted is not BatchAdapter.find_submitted

@@ -31,7 +31,7 @@ from .._http import request
 from ..capabilities import CAPABILITIES
 from ..handle import BatchHandle, JobStatus, RequestResult, State, utcnow
 from ..translate import decode_response, encode_body
-from .base import BatchAdapter
+from .base import KEY_FIELD, BatchAdapter
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
@@ -127,6 +127,7 @@ class GeminiAdapter(BatchAdapter):
         endpoint: str,
         window: str | None,
         api_key: str,
+        key: str | None = None,
     ) -> BatchHandle:
         """Create the batch against the model named in the URL.
 
@@ -135,6 +136,7 @@ class GeminiAdapter(BatchAdapter):
             endpoint: Which endpoint the lines target.
             window: Must be None; Gemini accepts no window parameter.
             api_key: Google AI Studio API key.
+            key: Submission key, used as the batch's display_name.
 
         Returns:
             A handle for the created job.
@@ -145,7 +147,7 @@ class GeminiAdapter(BatchAdapter):
             "POST",
             f"{BASE_URL}/models/{model}:batchGenerateContent",
             headers=self._headers(api_key),
-            json_body=self.build_batch(lines, display_name="batchlane"),
+            json_body=self.build_batch(lines, display_name=key or "batchlane"),
         ).json()
         return BatchHandle(
             provider="gemini",
@@ -158,7 +160,11 @@ class GeminiAdapter(BatchAdapter):
             # not by the key we supply. Carry the submitted order on the handle
             # so results can still be labelled after a cold start, and so an
             # index join is at least checkable against a known length.
-            extra={"keys": json.dumps([line.custom_id for line in lines])},
+            extra=(
+                {"keys": json.dumps([line.custom_id for line in lines]), KEY_FIELD: key}
+                if key is not None
+                else {"keys": json.dumps([line.custom_id for line in lines])}
+            ),
         )
 
     def status(self, handle: BatchHandle, *, api_key: str) -> JobStatus:
@@ -276,7 +282,9 @@ class GeminiAdapter(BatchAdapter):
                 lane="batch_inline",
                 created_at=utcnow(),
                 model=None,
-                extra={},
+                extra={
+                    KEY_FIELD: job.get("displayName") or job.get("display_name") or ""
+                },
             )
 
 
