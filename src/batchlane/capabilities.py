@@ -56,6 +56,10 @@ class LaneCapabilities:
     supports_list: bool = True
     result_retention: timedelta | None = None
     discount_note: str | None = None
+    #: Fraction off the synchronous rate, for deriving a batch price where the
+    #: provider publishes none. None means the saving is too model-dependent
+    #: to express as one number, and no estimate should claim otherwise.
+    discount: float | None = None
     notes: tuple[str, ...] = field(default_factory=tuple)
 
 
@@ -74,6 +78,7 @@ _OPENAI = LaneCapabilities(
     max_requests=50_000,
     max_input_bytes=200 * 1024 * 1024,
     discount_note="50%",
+    discount=0.5,
     notes=("Output files persist until deleted; no documented auto-expiry.",),
 )
 
@@ -87,6 +92,7 @@ _GROQ = LaneCapabilities(
     max_input_bytes=200 * 1024 * 1024,
     result_retention=timedelta(days=30),
     discount_note="50%, restricted to a documented model allowlist",
+    discount=0.5,
     notes=("Docs list 24h and 7d; intermediate window values are undocumented.",),
 )
 
@@ -100,6 +106,9 @@ _TOGETHER = LaneCapabilities(
     max_input_bytes=100 * 1024 * 1024,
     result_retention=None,
     discount_note="up to 50%; several models excluded from batch entirely",
+    # 'up to 50%' with several models excluded outright, so a single
+    # multiplier would overstate the saving on an unknown share of a job.
+    discount=None,
     notes=(
         "Upload purpose is 'batch-api', not the OpenAI-standard 'batch'.",
         "Reports a single progress float rather than a request_counts object.",
@@ -117,6 +126,7 @@ _DEEPINFRA = LaneCapabilities(
     max_input_bytes=200 * 1024 * 1024,
     result_retention=None,
     discount_note="20%",
+    discount=0.2,
     notes=(
         "Model must be uniform across the file even though it is carried per line.",
         "Docs describe no list-batches endpoint, but GET on the collection "
@@ -136,6 +146,7 @@ _MISTRAL = LaneCapabilities(
     max_input_bytes=512 * 1024 * 1024,
     result_retention=None,
     discount_note="50%",
+    discount=0.5,
     notes=(
         "Window is timeout_hours, a bare integer, so any Nh value is valid "
         "and the allowed tuple is left empty to mean unconstrained.",
@@ -156,6 +167,7 @@ _GEMINI = LaneCapabilities(
     max_input_bytes=20 * 1024 * 1024,
     result_retention=timedelta(weeks=6),
     discount_note="50%",
+    discount=0.5,
     notes=(
         "No caller-set window; the platform enforces a fixed 48h expiry.",
         "Docs say inline results map to requests by ARRAY INDEX, not by the "
@@ -178,6 +190,7 @@ _FIREWORKS = LaneCapabilities(
     supports_cancel=False,
     result_retention=None,
     discount_note="50%",
+    discount=0.5,
     notes=(
         "No cancel endpoint is documented; cancel() refuses rather than no-ops.",
         "Input is a registered dataset, not a file upload.",
@@ -201,6 +214,7 @@ _ANTHROPIC = LaneCapabilities(
     max_input_bytes=256 * 1024 * 1024,
     result_retention=timedelta(days=29),
     discount_note="50%",
+    discount=0.5,
     notes=(
         "No file upload; requests are inline under a 'requests' key on create.",
         "processing_status is only in_progress/ended -- terminality lives in "

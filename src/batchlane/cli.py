@@ -120,6 +120,10 @@ def _cmd_run(args: argparse.Namespace) -> int:
         file=sys.stderr,
     )
     if args.dry_run:
+        cost = chunking.cost
+        print(f"  {cost}", file=sys.stderr)  # noqa: T201 - a CLI
+        if cost.caveat:
+            print(f"  note: {cost.caveat}", file=sys.stderr)  # noqa: T201 - a CLI
         return 0
 
     by_id = {line.custom_id: row for line, (row, _p) in zip(lines, rows, strict=True)}

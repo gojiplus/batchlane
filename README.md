@@ -78,6 +78,19 @@ while re-running it costs what the job cost the first time.
 (1, 423, 209715200)
 ```
 
+```python
+>>> print(bl.plan(rows).cost)
+~$53.57 at batch rates vs ~$107.14 sync (upper bound)
+```
+
+The `~` means the rate was derived rather than published. Only OpenAI's batch
+rates appear in litellm's price registry; for the rest batchlane applies the
+provider's documented discount to its synchronous rate and says so. Together
+gets no estimate at all, because "up to 50% with some models excluded" cannot
+honestly be one multiplier. And output length is not knowable before a job
+runs, so `max_tokens` makes the figure an upper bound and its absence limits
+the estimate to the input side.
+
 Gemini's inline lane caps at 20MB — an order of magnitude below the
 file-based providers and with no request cap at all — so a job that is one
 batch on Groq can be a dozen on Gemini. `plan()` tells you before you spend.

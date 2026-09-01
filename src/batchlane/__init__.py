@@ -19,6 +19,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from .capabilities import CAPABILITIES, LaneCapabilities, capabilities_for
+from .cost import CostEstimate, estimate_cost
 from .errors import (
     AdapterNotShippedError,
     BatchlaneError,
@@ -46,6 +47,7 @@ __all__ = [
     "BatchlaneError",
     "CapabilityNotSupportedError",
     "ChunkPlan",
+    "CostEstimate",
     "JobStatus",
     "LaneCapabilities",
     "MixedModelBatchError",
@@ -54,6 +56,7 @@ __all__ = [
     "answer_text",
     "cancel",
     "capabilities_for",
+    "estimate_cost",
     "get_adapter",
     "list_jobs",
     "map",

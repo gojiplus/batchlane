@@ -30,6 +30,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterable, Iterator, Sequence
 
     from .adapters.base import BatchAdapter
+    from .cost import CostEstimate
     from .handle import JobStatus
 
 __all__ = ["ChunkPlan", "answer_text", "map", "plan", "run", "wait"]
@@ -85,6 +86,19 @@ class ChunkPlan:
             The chunk count.
         """
         return len(self.chunks)
+
+    @property
+    def cost(self) -> CostEstimate:
+        """What this job is likely to cost, batch against sync.
+
+        Returns:
+            The estimate, which names its own rate source and caveats.
+        """
+        from .cost import estimate_cost
+
+        flat = [line for chunk in self.chunks for line in chunk]
+        model = flat[0].model if flat else ""
+        return estimate_cost(flat, self.provider, model)
 
     @property
     def fits_in_one(self) -> bool:
