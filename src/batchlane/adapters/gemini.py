@@ -102,6 +102,24 @@ class GeminiAdapter(BatchAdapter):
             }
         }
 
+    def payload_bytes(self, lines: Sequence[BatchLine], *, endpoint: str) -> int:
+        """Size of the inline batch body these lines would send.
+
+        This is the measurement that matters most: Gemini's inline ceiling is
+        20MB, an order of magnitude below the file-based providers.
+
+        Args:
+            lines: The requests to measure.
+            endpoint: Unused; the model is taken from the lines.
+
+        Returns:
+            Size in bytes.
+        """
+        del endpoint
+        return len(
+            json.dumps(self.build_batch(lines, display_name="batchlane")).encode()
+        )
+
     def submit(
         self,
         lines: Sequence[BatchLine],

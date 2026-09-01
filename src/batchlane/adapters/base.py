@@ -52,6 +52,21 @@ class BatchAdapter(ABC):
         """
 
     @abstractmethod
+    def payload_bytes(self, lines: Sequence[BatchLine], *, endpoint: str) -> int:
+        """Serialized size of the payload these lines would produce.
+
+        Each adapter builds a different payload, so only it can measure one.
+        The chunker uses this to split a job to fit ``max_input_bytes``.
+
+        Args:
+            lines: The requests to measure.
+            endpoint: Which endpoint the lines target.
+
+        Returns:
+            Size in bytes of the body that would be sent.
+        """
+
+    @abstractmethod
     def status(self, handle: BatchHandle, *, api_key: str) -> JobStatus:
         """Poll a submitted job.
 
@@ -174,3 +189,15 @@ class BatchAdapter(ABC):
                 "max_requests",
                 f"lane caps a batch at {caps.max_requests} lines, got {len(lines)}",
             )
+        if caps.max_input_bytes is not None:
+            # Costs one extra encode of the payload. Cheap next to uploading
+            # the same bytes only to have the provider reject them, and
+            # batchlane.run() chunks beforehand so this rarely trips.
+            size = self.payload_bytes(lines, endpoint=endpoint)
+            if size > caps.max_input_bytes:
+                raise CapabilityNotSupportedError(
+                    caps.provider,
+                    "max_input_bytes",
+                    f"lane caps a batch at {caps.max_input_bytes} bytes, got "
+                    f"{size}. Use batchlane.run(), which splits to fit.",
+                )

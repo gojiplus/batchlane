@@ -141,6 +141,18 @@ class OpenAIShapedAdapter(BatchAdapter):
             )
         return ("\n".join(rendered) + "\n").encode()
 
+    def payload_bytes(self, lines: Sequence[BatchLine], *, endpoint: str) -> int:
+        """Size of the JSONL file these lines would upload.
+
+        Args:
+            lines: The requests to measure.
+            endpoint: Which endpoint the lines target.
+
+        Returns:
+            Size in bytes.
+        """
+        return len(self.build_jsonl(lines, endpoint=endpoint))
+
     def submit(
         self,
         lines: Sequence[BatchLine],

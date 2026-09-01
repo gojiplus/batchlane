@@ -91,6 +91,19 @@ class AnthropicAdapter(BatchAdapter):
             )
         return built
 
+    def payload_bytes(self, lines: Sequence[BatchLine], *, endpoint: str) -> int:
+        """Size of the inline create-request body these lines would send.
+
+        Args:
+            lines: The requests to measure.
+            endpoint: Unused; Anthropic's lane is chat-only.
+
+        Returns:
+            Size in bytes.
+        """
+        del endpoint
+        return len(json.dumps({"requests": self.build_requests(lines)}).encode())
+
     def submit(
         self,
         lines: Sequence[BatchLine],
