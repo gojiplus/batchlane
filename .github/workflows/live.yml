@@ -1,0 +1,28 @@
+name: Live provider tests
+
+# Hits real provider APIs and spends real money, so never on push or PR.
+# Batches are 2 lines at max_tokens=8; the bill is rounding error, but the
+# point is that only a human or the weekly cron decides to pay it.
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "23 7 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  live:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.13"
+      - run: uv sync --all-extras
+      - run: uv run pytest -m live -v
+        env:
+          BATCHLANE_LIVE: "1"
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          TOGETHER_API_KEY: ${{ secrets.TOGETHER_API_KEY }}
+          DEEPINFRA_TOKEN: ${{ secrets.DEEPINFRA_TOKEN }}

@@ -1,0 +1,25 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    # Weekly. batchlane depends on litellm internals and on provider APIs that
+    # change without warning; a quiet week is exactly when drift lands.
+    - cron: "17 6 * * 1"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ci:
+    uses: gojiplus/py-canon/.github/workflows/reusable-ci.yml@v1
+    with:
+      wheel-import: batchlane
+      coverage-floor: 90
+      python-versions: '["3.11", "3.12", "3.13", "3.14"]'

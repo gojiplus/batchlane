@@ -1,0 +1,19 @@
+name: Dependabot auto-merge
+
+# The logic lives in py-canon, so a fix there reaches this repo on its next
+# run instead of waiting for someone to copy a file across.
+
+on:
+  pull_request:
+  schedule:
+    - cron: "37 */3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  auto-merge:
+    uses: gojiplus/py-canon/.github/workflows/reusable-dependabot-auto-merge.yml@v1
+    secrets: inherit
