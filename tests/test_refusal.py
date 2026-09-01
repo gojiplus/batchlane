@@ -1,6 +1,7 @@
 import pytest
 
 import batchlane as bl
+from batchlane.capabilities import LOCAL_RUNTIME, NO_LANE, NOT_SHIPPED
 from batchlane.errors import AdapterNotShippedError
 
 
@@ -90,3 +91,47 @@ def test_litellm_covered_providers_point_somewhere_useful(provider):
     # A refusal that names no alternative is a dead end. litellm reaches these.
     with pytest.raises(AdapterNotShippedError, match="litellm"):
         bl.get_adapter(provider)
+
+
+@pytest.mark.parametrize("provider", ["ollama", "lm_studio", "llamafile", "vllm"])
+def test_a_self_hosted_runtime_is_refused_for_the_right_reason(provider):
+    # Not "we have no record of one". The reason is that you own the hardware,
+    # so there is no per-token price to discount in the first place.
+    with pytest.raises(bl.NoBatchLaneError, match="no per-token price"):
+        bl.get_adapter(provider)
+
+
+def test_hosted_vllm_names_the_command_that_actually_batches():
+    # litellm lists hosted_vllm as batch-capable and routes it to the OpenAI
+    # handler, but a stock `vllm serve` has no /v1/batches. Saying so, and
+    # naming run-batch, is the most useful answer available here.
+    with pytest.raises(bl.NoBatchLaneError, match="run-batch"):
+        bl.get_adapter("hosted_vllm")
+
+
+def test_the_three_refusal_tables_stay_disjoint():
+    # Each says something different about a provider; an overlap would make
+    # the answer depend on lookup order.
+    tables = {
+        "NO_LANE": set(NO_LANE),
+        "NOT_SHIPPED": set(NOT_SHIPPED),
+        "LOCAL": set(LOCAL_RUNTIME),
+    }
+    for a, b in (
+        ("NO_LANE", "NOT_SHIPPED"),
+        ("NO_LANE", "LOCAL"),
+        ("NOT_SHIPPED", "LOCAL"),
+    ):
+        assert not tables[a] & tables[b], (
+            f"{a} and {b} overlap: {tables[a] & tables[b]}"
+        )
+
+
+def test_no_refusal_table_names_a_shipped_provider():
+    shipped = set(bl.supported_providers())
+    for name, table in (
+        ("NO_LANE", NO_LANE),
+        ("NOT_SHIPPED", NOT_SHIPPED),
+        ("LOCAL", LOCAL_RUNTIME),
+    ):
+        assert not shipped & set(table), f"{name} names a provider we ship"

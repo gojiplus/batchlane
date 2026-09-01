@@ -236,6 +236,41 @@ NO_LANE: dict[str, str] = {
     ),
 }
 
+#: Runtimes you host yourself. There is no batch lane because there is no
+#: per-token price to discount: the hardware is already yours. Someone here who
+#: wants a job to finish sooner needs throughput, not a discount lane, so the
+#: refusal says that rather than implying a gap that might close.
+LOCAL_RUNTIME: dict[str, str] = {
+    "hosted_vllm": (
+        "you host it, so there is no per-token price to discount. Note that "
+        "litellm lists hosted_vllm as batch-capable and routes it to the "
+        "OpenAI batches handler, but a stock `vllm serve` exposes no "
+        "/v1/batches; vLLM's batch support is the offline `vllm run-batch` "
+        "CLI, which reads the same JSONL and writes results to a file"
+    ),
+    "vllm": (
+        "you host it, so there is no per-token price to discount. Use "
+        "`vllm run-batch -i input.jsonl -o output.jsonl`, which loads the "
+        "model once and streams the whole file through it"
+    ),
+}
+LOCAL_RUNTIME.update(
+    dict.fromkeys(
+        (
+            "ollama",
+            "ollama_chat",
+            "lm_studio",
+            "llamafile",
+            "oobabooga",
+            "triton",
+            "xinference",
+        ),
+        "you host it, so there is no per-token price to discount. What helps "
+        "here is throughput -- keeping the server busy with concurrent "
+        "requests -- not a batch lane",
+    )
+)
+
 #: Providers that do run a lane which batchlane has deliberately not shipped.
 #: Kept distinct from NO_LANE so the refusal never claims a lane is absent when
 #: it is merely unimplemented.

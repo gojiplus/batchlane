@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 from .adapters.anthropic import AnthropicAdapter
 from .adapters.gemini import GeminiAdapter
 from .adapters.openai_shaped import ROWS, OpenAIShapedAdapter
-from .capabilities import CAPABILITIES, NO_LANE, NOT_SHIPPED
+from .capabilities import CAPABILITIES, LOCAL_RUNTIME, NO_LANE, NOT_SHIPPED
 from .errors import AdapterNotShippedError, BatchlaneError, NoBatchLaneError
 from .translate import resolve
 
@@ -62,6 +62,10 @@ def get_adapter(provider: str) -> BatchAdapter:
         return OpenAIShapedAdapter(ROWS[provider])
     if provider in _BESPOKE:
         return _BESPOKE[provider]()
+    if provider in LOCAL_RUNTIME:
+        raise NoBatchLaneError(
+            provider, reason=LOCAL_RUNTIME[provider], alternatives=supported_providers()
+        )
     if provider in NO_LANE:
         raise NoBatchLaneError(
             provider, reason=NO_LANE[provider], alternatives=supported_providers()
