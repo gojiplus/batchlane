@@ -265,8 +265,8 @@ def run(
         timeout: Give up on a chunk after this long, or None to wait.
 
     Yields:
-        ``(line, result)`` pairs, in chunk-completion order. The line is the
-        caller's own, so no joining is needed on their side.
+        tuple[BatchLine, RequestResult]: pairs in chunk-completion order.
+            The line is the caller's own, so no joining is needed.
     """
     adapter, provider, _bare = _prepare(lines)
     key = resolve_api_key(provider, api_key)
@@ -308,8 +308,9 @@ def _pairs(
         api_key: Credential for this provider.
 
     Yields:
-        ``(line, result)`` pairs, including a synthesised error result for any
-        row the provider never answered -- silence is not success.
+        tuple[BatchLine, RequestResult]: pairs, including a synthesised
+            error for any row the provider never answered -- silence is not
+            success.
     """
     seen: set[str] = set()
     if final.state == "succeeded":

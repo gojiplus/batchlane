@@ -210,7 +210,7 @@ class AnthropicAdapter(BatchAdapter):
             api_key: Anthropic API key.
 
         Yields:
-            One result per line, joined on ``custom_id``.
+            RequestResult: One result per line, joined on ``custom_id``.
 
         Raises:
             RuntimeError: If the job has not ended, so no results exist yet.
@@ -238,7 +238,7 @@ class AnthropicAdapter(BatchAdapter):
             api_key: Anthropic API key.
 
         Yields:
-            A handle per batch the provider reports.
+            BatchHandle: A handle per batch the provider reports.
         """
         page = request(
             "GET", BASE_URL, headers=self._headers(api_key), params={"limit": limit}

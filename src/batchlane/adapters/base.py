@@ -89,8 +89,9 @@ class BatchAdapter(ABC):
             handle: The receipt from :meth:`submit`.
             api_key: Credential for this provider.
 
-        Yields:
-            One result per submitted line, joined on ``custom_id``.
+        Returns:
+            An iterator of results, one per submitted line, joined on
+            ``custom_id``.
         """
 
     def cancel(self, handle: BatchHandle, *, api_key: str) -> None:
@@ -125,7 +126,7 @@ class BatchAdapter(ABC):
             api_key: Credential for this provider.
 
         Yields:
-            One handle per job the provider reports.
+            BatchHandle: One handle per job the provider reports.
 
         Raises:
             CapabilityNotSupportedError: Always, unless a subclass overrides.

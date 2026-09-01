@@ -252,7 +252,7 @@ class OpenAIShapedAdapter(BatchAdapter):
             api_key: Credential for this provider.
 
         Yields:
-            One result per line, joined on ``custom_id``.
+            RequestResult: One result per line, joined on ``custom_id``.
         """
         job = request(
             "GET",
@@ -280,7 +280,7 @@ class OpenAIShapedAdapter(BatchAdapter):
             api_key: Credential for this provider.
 
         Yields:
-            A handle per job the provider reports.
+            BatchHandle: A handle per job the provider reports.
         """
         if not self.capabilities.supports_list:
             yield from BatchAdapter.list_jobs(self, limit=limit, api_key=api_key)

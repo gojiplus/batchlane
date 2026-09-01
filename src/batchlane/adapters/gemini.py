@@ -221,7 +221,8 @@ class GeminiAdapter(BatchAdapter):
             api_key: Google AI Studio API key.
 
         Yields:
-            One result per line, labelled with the submitted ``custom_id``.
+            RequestResult: One result per line, labelled with the submitted
+                ``custom_id``.
 
         Raises:
             RuntimeError: If the job has no results yet, or if the number
@@ -259,7 +260,7 @@ class GeminiAdapter(BatchAdapter):
             api_key: Google AI Studio API key.
 
         Yields:
-            A handle per batch the provider reports.
+            BatchHandle: A handle per batch the provider reports.
         """
         page = request(
             "GET",
@@ -309,7 +310,7 @@ def _join(
         model: The model the batch ran against, for decoding.
 
     Yields:
-        One labelled result per entry.
+        RequestResult: One labelled result per entry.
 
     Raises:
         RuntimeError: If no key is echoed and the counts disagree, so an index
