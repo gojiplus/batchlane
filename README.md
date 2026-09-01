@@ -1,19 +1,11 @@
 # batchlane
 
-Submit asynchronous batch jobs to whichever discount lane a provider actually
-runs — and get an honest refusal where none exists.
+Run batch inference at every provider's discount rate, through one interface.
 
-Most providers sell latency-insensitive inference at a discount. OpenAI,
-Anthropic, Gemini, Groq, Mistral, Together, Fireworks and DeepInfra all run an
-asynchronous lane, usually at 50% off. LiteLLM, which most people route
-through, can create a batch on exactly one of those eight. It can retrieve an
-Anthropic batch without being able to submit one, and it cannot batch Gemini
-through AI Studio at all. So bulk work routed through the gateway quietly pays
-full price.
-
-`batchlane` reaches the rest. It borrows LiteLLM's per-provider request and
-response translation — the hard, maintained part — and owns the job lifecycle
-itself.
+Nine providers sell latency-insensitive inference at roughly half price through
+an asynchronous batch lane. LiteLLM, which most people route through, can
+submit a batch to one of them. So bulk work sent through the gateway pays full
+price, and the fix is per-provider plumbing nobody wants to write.
 
 ```python
 import batchlane as bl
@@ -36,9 +28,18 @@ for line, result in bl.run(rows, checkpoint="job.jsonl"):
 ```
 
 One call splits the job to fit the provider's caps, submits however many
-batches that takes, waits, and hands back **each input row beside its answer**
-— so there is nothing to join on your side. It streams, so a 50,000-row job
-never sits in memory.
+batches that takes, waits, and hands back each input row beside its answer.
+Nothing to join on your side, and it streams, so a 50,000-row job never sits
+in memory.
+
+What that buys you:
+
+| | |
+|---|---|
+| **Half price, where it exists** | 50% on Anthropic, Gemini, OpenAI, Groq and Together; 20% on DeepInfra |
+| **One code path** | chunking, polling, and joining results back to rows are handled |
+| **Resumable** | a crash re-attaches to submitted jobs instead of paying for them twice |
+| **Honest about limits** | refuses where no lane exists rather than emulating one, and distinguishes "no lane" from "not built yet" |
 
 ## Resuming does not re-pay
 
