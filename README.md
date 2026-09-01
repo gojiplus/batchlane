@@ -10,7 +10,8 @@ price, and the fix is per-provider plumbing nobody wants to write.
 ```python
 import batchlane as bl
 
-answers = bl.map("groq/llama-3.3-70b-versatile", prompts, system="Classify the sentiment.")
+model = "groq/llama-3.3-70b-versatile"
+answers = bl.map(model, prompts, system="Classify the sentiment.")
 ```
 
 One prompt over many inputs, answers back in input order, `None` where a row
