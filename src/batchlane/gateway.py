@@ -26,6 +26,7 @@ pretending to enumerate.
 import base64
 import hashlib
 import json
+import re
 import zlib
 from collections.abc import Sequence
 from pathlib import Path
@@ -39,12 +40,46 @@ from .runner import plan
 __all__ = ["build_app", "decode_batch_id", "encode_batch_id"]
 
 BATCH_PREFIX = "batch_bl"
+
+#: Ids this gateway issues, and therefore the only ones it will read back. Both
+#: are checked against the pattern *and* for containment after resolution:
+#: identifiers arriving in a JSON body are not normalised by the router the way
+#: a path segment is, so a body field alone could otherwise walk out of the
+#: store and have its contents shipped to a provider.
+_FILE_ID = re.compile(r"file-[0-9a-f]{24}\Z")
+_SPILL_DIGEST = re.compile(r"[0-9a-f]{32}\Z")
 OUTPUT_PREFIX = "file-out-"
 
 #: Past this, a base64 id stops fitting comfortably in a URL path, so the
 #: handle list spills to disk and the id references it instead. Measured:
 #: about 200 chunks fit under this, and 500 chunks would be 5.4kB.
 _MAX_INLINE_TOKEN = 1500
+
+
+def _in_store(
+    base: Path, name: str, pattern: re.Pattern[str], suffix: str = ""
+) -> Path:
+    """Resolve a caller-supplied identifier to a path inside ``base``.
+
+    Args:
+        base: The directory the result must sit inside.
+        name: The caller-supplied identifier.
+        pattern: What a legitimate identifier looks like.
+        suffix: Extension to append, if any.
+
+    Returns:
+        The resolved path.
+
+    Raises:
+        BatchlaneError: If the name is not one we issued, or resolves outside
+            ``base``.
+    """
+    if not pattern.match(name):
+        raise BatchlaneError(f"Not an identifier this gateway issued: {name!r}")
+    resolved = (base / f"{name}{suffix}").resolve()
+    if not resolved.is_relative_to(base.resolve()):
+        raise BatchlaneError(f"Not an identifier this gateway issued: {name!r}")
+    return resolved
 
 
 def encode_batch_id(
@@ -89,7 +124,7 @@ def decode_batch_id(batch_id: str, spill_dir: Path | None = None) -> list[BatchH
     raw = batch_id.removeprefix(OUTPUT_PREFIX)
     if raw.startswith(f"{BATCH_PREFIX}ref_"):
         digest = raw.removeprefix(f"{BATCH_PREFIX}ref_")
-        path = (spill_dir or Path()) / f"{digest}.json"
+        path = _in_store(spill_dir or Path(), digest, _SPILL_DIGEST, ".json")
         if not path.exists():
             raise BatchlaneError(f"Unknown batch id {batch_id!r}.")
         blob = path.read_text()
@@ -188,17 +223,12 @@ def build_app(storage: Path | None = None) -> Any:
         # providers rather than read back off disk.
         if file_id.startswith(OUTPUT_PREFIX):
             return _collect(file_id)
-        path = files / file_id
-        if not path.exists():
-            raise HTTPException(status_code=404, detail=f"No such file: {file_id}")
-        return path.read_text()
+        return _stored(file_id).read_text()
 
     @app.post("/v1/batches")
     def create(payload: dict[str, Any]) -> dict[str, Any]:
-        file_id = payload.get("input_file_id", "")
-        path = files / file_id
-        if not path.exists():
-            raise HTTPException(status_code=404, detail=f"No such file: {file_id}")
+        file_id = str(payload.get("input_file_id", ""))
+        path = _stored(file_id)
         try:
             handles = _submit(path, payload.get("completion_window"))
         except BatchlaneError as exc:
@@ -233,6 +263,15 @@ def build_app(storage: Path | None = None) -> Any:
         # A server that holds no job state has nothing to enumerate. Saying so
         # beats inventing a list or failing a client that merely polls it.
         return {"object": "list", "data": [], "has_more": False}
+
+    def _stored(file_id: str) -> Path:
+        try:
+            path = _in_store(files, file_id, _FILE_ID)
+        except BatchlaneError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        if not path.is_file():
+            raise HTTPException(status_code=404, detail=f"No such file: {file_id}")
+        return path
 
     def _handles(batch_id: str) -> list[BatchHandle]:
         try:

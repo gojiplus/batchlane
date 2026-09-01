@@ -229,3 +229,77 @@ def test_a_large_job_spills_to_disk_instead_of_producing_an_unusable_url(tmp_pat
     small = encode_batch_id(handles[:1], tmp_path)
     assert len(decode_batch_id(small, tmp_path)) == 1
     assert "ref_" not in small, "a small job must stay stateless"
+
+
+# --- path traversal, both confirmed exploitable before these landed ---
+
+
+@pytest.mark.anyio
+@respx.mock
+async def test_a_traversing_input_file_id_cannot_read_outside_the_store(
+    client, tmp_path
+):
+    """The worst of the two: it was arbitrary file read plus exfiltration.
+
+    input_file_id arrives in a JSON body, which the router does not normalise
+    the way it does a path segment. Before the fix this read ../../outside.jsonl,
+    parsed it, and got as far as uploading its contents to Groq.
+    """
+    _allow_gateway()
+    import openai
+
+    for probe in (
+        "../../etc/passwd",
+        "../outside.jsonl",
+        "/etc/passwd",
+        "file-../../x",
+    ):
+        with pytest.raises(openai.NotFoundError) as exc:
+            await client.batches.create(
+                input_file_id=probe,
+                endpoint="/v1/chat/completions",
+                completion_window="24h",
+            )
+        assert "issued" in str(exc.value)
+    # Nothing may have reached a provider.
+    assert not [c for c in respx.calls if "groq" in str(c.request.url)]
+
+
+@pytest.mark.anyio
+@respx.mock
+async def test_a_traversing_file_id_cannot_be_read_back(client):
+    _allow_gateway()
+    import openai
+
+    for probe in ("..%2F..%2Fetc%2Fpasswd", "file-not-hex-at-all", "../secrets"):
+        with pytest.raises((openai.NotFoundError, openai.APIStatusError)):
+            await client.files.content(probe)
+
+
+def test_a_traversing_spill_digest_cannot_be_read(tmp_path):
+    # decode_batch_id took the digest straight from a caller-supplied batch id.
+    outside = tmp_path / "PWNED.json"
+    outside.write_text("[]")
+    spill = tmp_path / "jobs"
+    spill.mkdir()
+    for probe in ("../PWNED", "../../etc/hosts", "not-hex", "a" * 31):
+        with pytest.raises(bl.BatchlaneError, match="issued"):
+            decode_batch_id(f"batch_blref_{probe}", spill)
+
+
+def test_a_legitimately_spilled_job_still_round_trips(tmp_path):
+    # The validation must not break the case it guards.
+    handles = [
+        bl.BatchHandle(
+            provider="groq",
+            job_id=f"b{i}",
+            endpoint="chat.completions",
+            lane="batch_file",
+            created_at=bl.handle.utcnow(),
+            extra={"input_file_id": f"f{i}"},
+        )
+        for i in range(500)
+    ]
+    spilled = encode_batch_id(handles, tmp_path)
+    assert "ref_" in spilled
+    assert len(decode_batch_id(spilled, tmp_path)) == 500
