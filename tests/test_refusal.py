@@ -32,7 +32,7 @@ def test_unshipped_adapter_is_not_reported_as_a_missing_lane():
 
 def test_planned_provider_says_planned_not_absent():
     with pytest.raises(AdapterNotShippedError):
-        bl.get_adapter("mistral")
+        bl.get_adapter("fireworks_ai")
 
 
 def test_empty_batch_refused():

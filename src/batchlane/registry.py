@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 
 from .adapters.anthropic import AnthropicAdapter
 from .adapters.gemini import GeminiAdapter
+from .adapters.mistral import MistralAdapter
 from .adapters.openai_shaped import ROWS, OpenAIShapedAdapter
 from .capabilities import CAPABILITIES, LOCAL_RUNTIME, NO_LANE, NOT_SHIPPED
 from .errors import AdapterNotShippedError, BatchlaneError, NoBatchLaneError
@@ -22,6 +23,7 @@ __all__ = ["get_adapter", "resolve_api_key", "supported_providers"]
 _BESPOKE: dict[str, type[BatchAdapter]] = {
     "anthropic": AnthropicAdapter,
     "gemini": GeminiAdapter,
+    "mistral": MistralAdapter,
 }
 
 _ENV_VARS: dict[str, tuple[str, ...]] = {

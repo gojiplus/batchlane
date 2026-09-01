@@ -117,7 +117,7 @@ rate limits and a 24-hour window. So it refuses, and says why:
 NoBatchLaneError: 'openrouter' has no asynchronous batch lane: It resells
 upstream capacity at retail, so it has no idle fleet to backfill and cannot
 price a discount lane. Providers with a lane: anthropic, deepinfra, gemini,
-groq, openai, together_ai.
+groq, mistral, openai, together_ai.
 ```
 
 A provider whose lane exists but is unimplemented gets a *different* error, so
@@ -135,6 +135,7 @@ No spend gates and no estimates. Use the gateway you already have for that.
 | Gemini AI Studio | 50% | none | pending | inline only; joins by index, see below |
 | OpenAI | 50% | 24h | no | the reference lane; litellm covers it too |
 | Groq | 50% | 24h or 7d | no | model allowlist |
+| Mistral | 50% | any Nh | no | model scoped to the job, not the line |
 | Together | up to 50% | 24h fixed | no | some models excluded from batch |
 | DeepInfra | 20% | 24h | no | model must be uniform across the file |
 
@@ -150,7 +151,7 @@ about the output looks wrong.
 
 ## What is missing, and why
 
-Mistral and Fireworks are planned. xAI is skipped on purpose: its lane
+Fireworks is planned. xAI is skipped on purpose: its lane
 discounts 20% rather than 50%, and its own docs exclude the flagship models.
 
 Azure, Vertex AI and Bedrock are unshipped because litellm already reaches

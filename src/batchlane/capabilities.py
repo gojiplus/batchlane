@@ -137,7 +137,8 @@ _MISTRAL = LaneCapabilities(
     result_retention=None,
     discount_note="50%",
     notes=(
-        "Window is timeout_hours, a bare integer, not an enum string.",
+        "Window is timeout_hours, a bare integer, so any Nh value is valid "
+        "and the allowed tuple is left empty to mean unconstrained.",
         "Batch path is /v1/batch/jobs, not /v1/batches.",
         "Result retention and discount exclusions are undocumented.",
     ),
