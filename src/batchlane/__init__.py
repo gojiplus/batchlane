@@ -33,6 +33,7 @@ from .registry import (
     resolve_api_key,
     supported_providers,
 )
+from .runner import ChunkPlan, plan, run, wait
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
@@ -44,6 +45,7 @@ __all__ = [
     "BatchLine",
     "BatchlaneError",
     "CapabilityNotSupportedError",
+    "ChunkPlan",
     "JobStatus",
     "LaneCapabilities",
     "MixedModelBatchError",
@@ -53,10 +55,13 @@ __all__ = [
     "capabilities_for",
     "get_adapter",
     "list_jobs",
+    "plan",
     "results",
+    "run",
     "status",
     "submit",
     "supported_providers",
+    "wait",
 ]
 
 __version__ = "0.1.0"

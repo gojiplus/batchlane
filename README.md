@@ -16,28 +16,66 @@ itself.
 ```python
 import batchlane as bl
 
-handle = bl.submit(
-    [
-        bl.BatchLine(
-            "row-1",
-            "groq/llama-3.3-70b-versatile",
-            [{"role": "user", "content": "Classify: the product was great"}],
-        ),
-        bl.BatchLine(
-            "row-2",
-            "groq/llama-3.3-70b-versatile",
-            [{"role": "user", "content": "Classify: it broke in a week"}],
-        ),
-    ],
-    window="7d",
-)
+rows = [
+    bl.BatchLine(
+        "row-1",
+        "groq/llama-3.3-70b-versatile",
+        [{"role": "user", "content": "Classify: the product was great"}],
+    ),
+    bl.BatchLine(
+        "row-2",
+        "groq/llama-3.3-70b-versatile",
+        [{"role": "user", "content": "Classify: it broke in a week"}],
+    ),
+]
 
-# The handle is JSON. Save it, exit, poll from anywhere.
+for line, result in bl.run(rows, checkpoint="job.jsonl"):
+    print(line.custom_id, result.response["choices"][0]["message"]["content"])
+```
+
+One call splits the job to fit the provider's caps, submits however many
+batches that takes, waits, and hands back **each input row beside its answer**
+— so there is nothing to join on your side. It streams, so a 50,000-row job
+never sits in memory.
+
+### Resuming does not re-pay
+
+With `checkpoint=` set, every submitted job is recorded before anything that
+could fail. If the process dies, rerun the identical call: batchlane
+re-attaches to the jobs it already submitted and re-reads their output rather
+than running inference again. That works because providers retain results for
+weeks (Anthropic 29 days, Gemini 6 weeks, Groq 30 days), so the checkpoint
+stores *handles*, not results. Fetching is free; inference is not.
+
+### Will it fit?
+
+```python
+>>> p = bl.plan(rows)
+>>> p.n_chunks, p.total_bytes, p.limit_bytes
+(1, 423, 209715200)
+```
+
+Gemini's inline lane caps at 20MB — an order of magnitude below the
+file-based providers and with no request cap at all — so a job that is one
+batch on Groq can be a dozen on Gemini. `plan()` tells you before you spend.
+
+batchlane deliberately does **not** try to pick a chunk size for faster
+turnaround. That depends on the provider's queue depth, which is invisible and
+volatile: the same Anthropic account returned one batch in 200 seconds and the
+next in over ten minutes. Fitting the caps is well defined; optimising latency
+would be a guess dressed as a feature.
+
+### The primitives are still there
+
+`run()` is built on them, not instead of them:
+
+```python
+handle = bl.submit(rows)  # -> BatchHandle, JSON-serialisable
 open("job.json", "w").write(handle.to_json())
-
-status = bl.status(handle)  # -> JobStatus(state="running", ...)
-for result in bl.results(handle):  # streams; joined on your custom_id
-    print(result.custom_id, result.response["choices"][0]["message"]["content"])
+bl.wait(handle)  # the poll loop nobody should write twice
+list(bl.results(handle))  # joined on your custom_id
+bl.cancel(handle)
+bl.list_jobs("groq")
 ```
 
 ## What it will not do
