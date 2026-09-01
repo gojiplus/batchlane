@@ -5,9 +5,11 @@ on:
     branches: [main]
   pull_request:
   schedule:
-    # Weekly. batchlane depends on litellm internals and on provider APIs that
-    # change without warning; a quiet week is exactly when drift lands.
-    - cron: "17 6 * * 1"
+    - cron: "17 6 * * 1"  # weekly: surface ecosystem drift on quiet repos
+  # A merge made with GITHUB_TOKEN does not trigger workflows, so an
+  # auto-merged Dependabot PR leaves the default branch at a commit no CI run
+  # ever covered. The auto-merge sweep dispatches this after it lands one.
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -22,4 +24,5 @@ jobs:
     with:
       wheel-import: batchlane
       coverage-floor: 90
+      run-preen: true
       python-versions: '["3.11", "3.12", "3.13", "3.14"]'

@@ -46,17 +46,22 @@ dev = [
     "pydoclint>=0.9",
 ]
 test = ["pytest>=8", "pytest-cov>=5", "respx>=0.21"]
+docs = ["sphinx>=8", "furo", "myst-parser", "sphinx-copybutton", "py-canon @ git+https://github.com/gojiplus/py-canon@v1"]
 
 [tool.ruff]
 line-length = 88
 target-version = "py311"
 
 [tool.ruff.lint]
+external = ["DOC"]
 select = [
     "E", "W", "F", "I", "B", "C4", "UP", "N", "D", "S", "SIM", "T20", "PT", "RUF",
     "PTH", "RET", "PIE", "FURB", "PERF", "DTZ", "LOG", "G", "TC", "FLY",
     "RSE", "SLOT", "FA", "A", "EXE", "ICN", "PGH", "PLE", "ARG", "SLF",
 ]
+# D203/D213: the google convention the fleet standard picks. W191/D206/D300:
+# ruff's own docs list these as always incompatible with `ruff format`, which
+# the standard also runs.
 ignore = ["D203", "D213", "W191", "D206", "D300"]
 
 [tool.ruff.lint.pydocstyle]
@@ -64,6 +69,7 @@ convention = "google"
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["S101", "D", "ARG", "SLF"]
+"docs/**" = ["D"]
 
 [tool.pydoclint]
 style = "google"
@@ -71,7 +77,7 @@ arg-type-hints-in-docstring = false
 check-return-types = false
 check-class-attributes = false
 allow-init-docstring = true
-exclude = '\.venv|tests'
+exclude = '\.venv|tests|docs'
 
 [tool.pyright]
 include = ["src"]
@@ -88,6 +94,26 @@ markers = ["live: hits real provider APIs; needs keys and BATCHLANE_LIVE=1"]
 [tool.coverage.run]
 source = ["src"]
 
+[tool.codespell]
+# "trough" is the demand trough in a GPU fleet's utilisation curve -- the
+# reason batch discounts exist at all -- not a misspelling of "through".
+ignore-words-list = "trough"
+
 [tool.preen]
+# A placeholder host on an httpx.Request that is constructed only to satisfy
+# litellm's response-transform signature and is never sent anywhere.
+link_ignore = [
+    # Not documentation links: these are provider API bases and endpoints,
+    # which correctly answer 404 or 401 to the bare GET a link checker makes.
+    "https://api.openai.com/*",
+    "https://api.groq.com/*",
+    "https://api.together.xyz/*",
+    "https://api.deepinfra.com/*",
+    "https://api.anthropic.com/*",
+    "https://generativelanguage.googleapis.com/*",
+    # A placeholder host on an httpx.Request built only to satisfy litellm's
+    # response-transform signature; it is never sent anywhere.
+    "https://batchlane.local/*",
+]
 src_layout = true
 tests_at_root = true

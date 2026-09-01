@@ -1,0 +1,13 @@
+# Managed by copier — records template version for `copier update`. Do not edit.
+_commit: v1.3.0
+_src_path: gh:gojiplus/py-canon
+author_email: contact@gsood.com
+author_name: Gaurav Sood
+coverage_floor: 90
+default_branch: main
+description: Submit async batch jobs to any LLM provider's discount lane, or refuse
+    honestly
+needs_cli: false
+org: gojiplus
+package_name: batchlane
+project_name: batchlane
