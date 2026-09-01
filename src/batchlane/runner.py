@@ -20,16 +20,16 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from .errors import BatchlaneError
-from .handle import BatchHandle, RequestResult
+from .handle import BatchHandle, BatchLine, RequestResult
 from .registry import adapter_for_model, resolve_api_key
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator, Sequence
+    from collections.abc import Iterable, Iterator, Sequence
 
     from .adapters.base import BatchAdapter
-    from .handle import BatchLine, JobStatus
+    from .handle import JobStatus
 
-__all__ = ["ChunkPlan", "plan", "run", "wait"]
+__all__ = ["ChunkPlan", "answer_text", "map", "plan", "run", "wait"]
 
 #: Headroom under a provider's byte cap. Per-line measurement is a slight
 #: overestimate of marginal cost, but envelope overhead and any provider-side
@@ -333,3 +333,78 @@ def _pairs(
                     },
                 ),
             )
+
+
+def answer_text(result: RequestResult) -> str | None:
+    """Pull the assistant's text out of a result, if there is one.
+
+    Every adapter normalizes to OpenAI chat-completion shape, so one accessor
+    works across providers.
+
+    Args:
+        result: One row's outcome.
+
+    Returns:
+        The message content, or None if the row failed or carried no text.
+    """
+    if not result.ok or not isinstance(result.response, dict):
+        return None
+    choices = result.response.get("choices") or []
+    if not choices:
+        return None
+    return (choices[0].get("message") or {}).get("content")
+
+
+def map(  # noqa: A001 - deliberately mirrors the builtin's shape
+    model: str,
+    prompts: Iterable[str],
+    *,
+    system: str | None = None,
+    checkpoint: str | Path | None = None,
+    poll_interval: float = DEFAULT_POLL_SECONDS,
+    timeout: float | None = None,
+    api_key: str | None = None,
+    **params: object,
+) -> list[str | None]:
+    """Run one prompt over many inputs and get the answers back in order.
+
+    The common case, without building request objects by hand:
+
+        answers = batchlane.map("groq/llama-3.3-70b-versatile", prompts)
+
+    A thin wrapper over :func:`run`, so it inherits chunking to provider caps,
+    resumption from a checkpoint, and joining results back to their rows.
+
+    Args:
+        model: A provider-prefixed model, e.g. ``"groq/llama-3.3-70b-versatile"``.
+        prompts: The user prompts, one per row.
+        system: An optional system prompt applied to every row.
+        checkpoint: Path to record submitted jobs, enabling resume.
+        poll_interval: Seconds between polls.
+        timeout: Give up on a chunk after this long, or None to wait.
+        api_key: Credential, or None to read it from the environment.
+        **params: Passed through to the model, e.g. ``max_tokens=64``.
+
+    Returns:
+        One answer per prompt, in input order. An entry is None where that row
+        failed, so the list always lines up with the input.
+    """
+    rows = list(prompts)
+    lines = []
+    for index, prompt in enumerate(rows):
+        messages: list[dict[str, object]] = []
+        if system is not None:
+            messages.append({"role": "system", "content": system})
+        messages.append({"role": "user", "content": prompt})
+        lines.append(BatchLine(f"row-{index}", model, messages, dict(params)))
+
+    answers: dict[str, str | None] = {}
+    for line, result in run(
+        lines,
+        checkpoint=checkpoint,
+        poll_interval=poll_interval,
+        timeout=timeout,
+        api_key=api_key,
+    ):
+        answers[line.custom_id] = answer_text(result)
+    return [answers.get(f"row-{i}") for i in range(len(rows))]

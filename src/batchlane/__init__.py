@@ -33,7 +33,7 @@ from .registry import (
     resolve_api_key,
     supported_providers,
 )
-from .runner import ChunkPlan, plan, run, wait
+from .runner import ChunkPlan, answer_text, map, plan, run, wait  # noqa: A004
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
@@ -51,10 +51,12 @@ __all__ = [
     "MixedModelBatchError",
     "NoBatchLaneError",
     "RequestResult",
+    "answer_text",
     "cancel",
     "capabilities_for",
     "get_adapter",
     "list_jobs",
+    "map",
     "plan",
     "results",
     "run",

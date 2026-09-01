@@ -10,6 +10,27 @@ price, and the fix is per-provider plumbing nobody wants to write.
 ```python
 import batchlane as bl
 
+answers = bl.map("groq/llama-3.3-70b-versatile", prompts, system="Classify the sentiment.")
+```
+
+One prompt over many inputs, answers back in input order, `None` where a row
+failed. Underneath it splits the job to fit the provider's caps, submits
+however many batches that takes, waits, and rejoins the results.
+
+From the shell, for the file-to-file case:
+
+```bash
+batchlane run rows.jsonl --model groq/llama-3.3-70b-versatile -o answers.jsonl
+```
+
+Every field on an input row is copied to its output row beside a new `answer`,
+so your own columns stay attached to their results. `--dry-run` reports the
+chunking without submitting anything; `batchlane providers` lists the lanes.
+
+When you need per-row control, `run()` gives you each input back beside its
+result:
+
+```python
 rows = [
     bl.BatchLine(
         "row-1",
@@ -24,13 +45,10 @@ rows = [
 ]
 
 for line, result in bl.run(rows, checkpoint="job.jsonl"):
-    print(line.custom_id, result.response["choices"][0]["message"]["content"])
+    print(line.custom_id, bl.answer_text(result))
 ```
 
-One call splits the job to fit the provider's caps, submits however many
-batches that takes, waits, and hands back each input row beside its answer.
-Nothing to join on your side, and it streams, so a 50,000-row job never sits
-in memory.
+It streams, so a 50,000-row job never sits in memory.
 
 What that buys you:
 
