@@ -192,6 +192,17 @@ def _cmd_serve(args: argparse.Namespace) -> int:
     Raises:
         BatchlaneError: If the optional server extras are not installed.
     """
+    # The safety check comes first on purpose. Whether uvicorn is installed
+    # has nothing to do with whether this address is safe to serve on, and
+    # reporting a missing dependency instead would bury the real problem.
+    key = args.api_key or os.environ.get("BATCHLANE_GATEWAY_KEY")
+    if key is None and args.host not in ("127.0.0.1", "localhost", "::1"):
+        raise BatchlaneError(
+            f"Refusing to serve on {args.host} without a key. This gateway "
+            f"spends your provider credits, so anyone who can reach it can "
+            f"spend money. Pass --api-key or set BATCHLANE_GATEWAY_KEY."
+        )
+
     try:
         import uvicorn
     except ImportError as exc:
@@ -201,14 +212,6 @@ def _cmd_serve(args: argparse.Namespace) -> int:
         ) from exc
 
     from .gateway import build_app
-
-    key = args.api_key or os.environ.get("BATCHLANE_GATEWAY_KEY")
-    if key is None and args.host not in ("127.0.0.1", "localhost", "::1"):
-        raise BatchlaneError(
-            f"Refusing to serve on {args.host} without a key. This gateway "
-            f"spends your provider credits, so anyone who can reach it can "
-            f"spend money. Pass --api-key or set BATCHLANE_GATEWAY_KEY."
-        )
 
     print(  # noqa: T201 - a CLI
         f"batchlane gateway on http://{args.host}:{args.port}/v1 -- point an "
