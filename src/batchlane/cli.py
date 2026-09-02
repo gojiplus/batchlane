@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -201,12 +202,22 @@ def _cmd_serve(args: argparse.Namespace) -> int:
 
     from .gateway import build_app
 
+    key = args.api_key or os.environ.get("BATCHLANE_GATEWAY_KEY")
+    if key is None and args.host not in ("127.0.0.1", "localhost", "::1"):
+        raise BatchlaneError(
+            f"Refusing to serve on {args.host} without a key. This gateway "
+            f"spends your provider credits, so anyone who can reach it can "
+            f"spend money. Pass --api-key or set BATCHLANE_GATEWAY_KEY."
+        )
+
     print(  # noqa: T201 - a CLI
         f"batchlane gateway on http://{args.host}:{args.port}/v1 -- point an "
         f"OpenAI client's base_url here",
         file=sys.stderr,
     )
-    uvicorn.run(build_app(Path(args.storage)), host=args.host, port=args.port)
+    uvicorn.run(
+        build_app(Path(args.storage), api_key=key), host=args.host, port=args.port
+    )
     return 0
 
 
@@ -256,6 +267,11 @@ def build_parser() -> argparse.ArgumentParser:
     serve.add_argument("--host", default="127.0.0.1")
     serve.add_argument("--port", type=int, default=8000)
     serve.add_argument("--storage", default="batchlane-gateway")
+    serve.add_argument(
+        "--api-key",
+        default=None,
+        help="require this bearer token; mandatory off loopback",
+    )
     serve.set_defaults(func=_cmd_serve)
     return parser
 

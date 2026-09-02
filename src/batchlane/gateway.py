@@ -27,6 +27,7 @@ import base64
 import hashlib
 import json
 import re
+import secrets
 import zlib
 from collections.abc import Sequence
 from pathlib import Path
@@ -54,6 +55,15 @@ OUTPUT_PREFIX = "file-out-"
 #: handle list spills to disk and the id references it instead. Measured:
 #: about 200 chunks fit under this, and 500 chunks would be 5.4kB.
 _MAX_INLINE_TOKEN = 1500
+
+#: An id longer than this was never issued by us, so it is rejected before
+#: anything tries to decompress it.
+_MAX_ACCEPTED_TOKEN = 4096
+
+#: zlib will happily turn a small token into gigabytes. Measured: a 272kB id
+#: expanded to 459MB. Decoding is bounded to a little over the largest handle
+#: list this gateway can produce.
+_MAX_DECOMPRESSED = 8 * 1024 * 1024
 
 
 def _in_store(
@@ -130,9 +140,20 @@ def decode_batch_id(batch_id: str, spill_dir: Path | None = None) -> list[BatchH
         blob = path.read_text()
     elif raw.startswith(f"{BATCH_PREFIX}_"):
         token = raw.removeprefix(f"{BATCH_PREFIX}_")
+        if len(token) > _MAX_ACCEPTED_TOKEN:
+            raise BatchlaneError("Batch id is longer than this gateway issues.")
         padded = token + "=" * (-len(token) % 4)
         try:
-            blob = zlib.decompress(base64.urlsafe_b64decode(padded)).decode()
+            packed = base64.urlsafe_b64decode(padded)
+            # Bounded rather than zlib.decompress: an unbounded inflate of a
+            # caller-supplied token is a denial of service, not a parse. A
+            # 272kB id was measured expanding to 459MB.
+            engine = zlib.decompressobj()
+            blob = engine.decompress(packed, _MAX_DECOMPRESSED).decode()
+            if not engine.eof:
+                raise BatchlaneError("Batch id expands beyond any job we issue.")
+        except BatchlaneError:
+            raise
         except Exception as exc:
             raise BatchlaneError(f"Malformed batch id {batch_id!r}.") from exc
     else:
@@ -168,12 +189,15 @@ def _aggregate(statuses: list[Any]) -> tuple[str, dict[str, int]]:
     return "in_progress", counts
 
 
-def build_app(storage: Path | None = None) -> Any:
+def build_app(storage: Path | None = None, api_key: str | None = None) -> Any:
     """Construct the ASGI application.
 
     Args:
         storage: Directory for uploaded files and spilled handle lists.
             Defaults to ``./batchlane-gateway``.
+        api_key: If set, every request must carry it as a bearer token. The
+            gateway spends the operator's provider credits, so anyone who can
+            reach it can spend money; on anything but loopback, set this.
 
     Returns:
         A FastAPI application.
@@ -182,7 +206,15 @@ def build_app(storage: Path | None = None) -> Any:
         BatchlaneError: If the optional server dependencies are not installed.
     """
     try:
-        from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+        from fastapi import (
+            Depends,
+            FastAPI,
+            File,
+            Form,
+            Header,
+            HTTPException,
+            UploadFile,
+        )
         from fastapi.responses import PlainTextResponse
     except ImportError as exc:  # pragma: no cover - exercised by install shape
         raise BatchlaneError(
@@ -199,7 +231,25 @@ def build_app(storage: Path | None = None) -> Any:
     # Handlers are sync on purpose: each one makes blocking calls to a
     # provider, and FastAPI runs sync endpoints in a threadpool rather than on
     # the event loop.
-    app = FastAPI(title="batchlane", description="OpenAI-compatible batch gateway")
+    def guard(authorization: Annotated[str | None, Header()] = None) -> None:
+        """Reject a request that does not carry the configured bearer token.
+
+        Args:
+            authorization: The Authorization header, if the client sent one.
+
+        Raises:
+            HTTPException: If a key is configured and the request lacks it.
+        """
+        if api_key is None:
+            return
+        if not secrets.compare_digest(authorization or "", f"Bearer {api_key}"):
+            raise HTTPException(status_code=401, detail="Invalid API key.")
+
+    app = FastAPI(
+        title="batchlane",
+        description="OpenAI-compatible batch gateway",
+        dependencies=[Depends(guard)],
+    )
 
     @app.post("/v1/files")
     def upload(

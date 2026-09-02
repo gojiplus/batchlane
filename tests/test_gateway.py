@@ -303,3 +303,83 @@ def test_a_legitimately_spilled_job_still_round_trips(tmp_path):
     spilled = encode_batch_id(handles, tmp_path)
     assert "ref_" in spilled
     assert len(decode_batch_id(spilled, tmp_path)) == 500
+
+
+# --- denial of service and access control ---
+
+
+def test_a_compressed_bomb_cannot_be_inflated_through_a_batch_id():
+    """A short id must not be able to allocate gigabytes.
+
+    Measured before the bound: a 272kB id expanded to 459MB, so a handful of
+    concurrent requests would exhaust the process.
+    """
+    import base64
+    import zlib
+
+    from batchlane.gateway import BATCH_PREFIX
+
+    token = (
+        base64.urlsafe_b64encode(zlib.compress(b"A" * (64 * 1024 * 1024), 9))
+        .decode()
+        .rstrip("=")
+    )
+    with pytest.raises(bl.BatchlaneError, match="longer than this gateway issues"):
+        decode_batch_id(f"{BATCH_PREFIX}_{token}")
+
+
+def test_an_id_within_the_issued_size_still_decodes():
+    # The bound must not break the jobs it protects.
+    handles = [
+        bl.BatchHandle(
+            provider="groq",
+            job_id=f"b{i}",
+            endpoint="chat.completions",
+            lane="batch_file",
+            created_at=bl.handle.utcnow(),
+            extra={"input_file_id": f"f{i}"},
+        )
+        for i in range(50)
+    ]
+    assert len(decode_batch_id(encode_batch_id(handles))) == 50
+
+
+@pytest.mark.anyio
+async def test_without_a_key_every_route_is_open_and_with_one_none_are(
+    tmp_path, monkeypatch
+):
+    # The gateway spends the operator's provider credits, so reachability is
+    # spending authority.
+    monkeypatch.setenv("GROQ_API_KEY", "k")
+    import openai
+
+    guarded = build_app(tmp_path / "a", api_key="s3cret")
+    transport = httpx.ASGITransport(app=guarded)
+
+    anon = openai.AsyncOpenAI(
+        base_url="http://gateway.invalid/v1",
+        api_key="wrong",
+        http_client=httpx.AsyncClient(transport=transport),
+    )
+    with pytest.raises(openai.AuthenticationError):
+        await anon.batches.list()
+
+    authorised = openai.AsyncOpenAI(
+        base_url="http://gateway.invalid/v1",
+        api_key="s3cret",
+        http_client=httpx.AsyncClient(transport=transport),
+    )
+    assert (await authorised.batches.list()).data == []
+
+
+def test_serving_beyond_loopback_without_a_key_is_refused(monkeypatch, capsys):
+    # The dangerous default is one flag away, so the CLI blocks it rather than
+    # documenting it.
+    from batchlane.cli import main
+
+    monkeypatch.delenv("BATCHLANE_GATEWAY_KEY", raising=False)
+    # The literal is the point of the test: this is the address that must be
+    # refused without a key.
+    exposed = "0.0.0.0"  # noqa: S104
+    assert main(["serve", "--host", exposed]) == 2
+    assert "spends your provider credits" in capsys.readouterr().err

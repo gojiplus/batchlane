@@ -146,6 +146,22 @@ batch references it, and a job past roughly 200 chunks spills its handles to
 disk because the id would no longer fit in a URL. `GET /v1/batches` returns an
 empty list, since a server holding nothing has nothing to enumerate.
 
+**Running it exposes spending authority.** The gateway submits jobs with your
+provider keys, so anyone who can reach it can spend your money. It binds
+loopback by default and **refuses to serve on any other address without a
+key**:
+
+```bash
+batchlane serve --host 0.0.0.0 --api-key "$(openssl rand -hex 16)"
+```
+
+Clients then send that as their `api_key`. Provider credentials stay in the
+gateway's environment and never reach a client.
+
+Note also that a `batch_id` is a bearer capability: it carries the job, so
+whoever holds it can poll and read that job's results. That is what makes the
+server stateless, and it is the trade being made.
+
 A solo user never has to run any of this; the library alone is enough.
 
 ## What it will not do
