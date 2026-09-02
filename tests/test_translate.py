@@ -130,3 +130,20 @@ def test_encode_body_does_not_mutate_the_caller_s_messages():
     assert [m["role"] for m in shared] == ["system", "user"]
     assert "system" in first
     assert "system" in second
+
+
+@pytest.mark.parametrize(("provider", "spec"), CASES, ids=[c[0] for c in CASES])
+def test_no_live_call_artefacts_reach_the_batch_file(provider, spec):
+    """A batch line must carry only what the request needs.
+
+    litellm builds bodies for live calls, so it adds `stream: false` and an
+    empty `extra_body`. Both are default values, so dropping them changes
+    nothing about the request while sending them can only be rejected: an
+    unknown key to a strict validator, and a streaming flag in a context that
+    does not stream. Mistral's config already omitted stream, which is what
+    made the inconsistency visible.
+    """
+    _p, bare, _b = resolve(spec)
+    body = encode_body(provider, bare, MESSAGES, dict(PARAMS))
+    assert "stream" not in body
+    assert "extra_body" not in body

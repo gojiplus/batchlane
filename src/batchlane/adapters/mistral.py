@@ -10,6 +10,9 @@ that matter:
 
 It does accept a ``metadata`` map, so a submission key can be stamped and a
 job orphaned by a crash found again.
+
+Shape verified against docs.mistral.ai/api/endpoint/batch. Not yet exercised
+against a live API.
 """
 
 from __future__ import annotations

@@ -94,11 +94,15 @@ def encode_body(
         litellm_params={},
         headers={},
     )
-    # litellm injects an empty extra_body on OpenAI-shaped providers. Harmless
-    # in a live call, but some batch validators reject unknown keys, and it is
-    # pure noise in a file a human may need to read.
-    if body.get("extra_body") == {}:
-        body.pop("extra_body")
+    # litellm adds two fields that belong to a live call rather than a batch
+    # line. Both are the default value, so dropping them changes nothing about
+    # the request, while sending them can only ever be rejected: an empty
+    # extra_body is an unknown key to a strict validator, and stream has no
+    # meaning in a batch, which is not a streaming context. Mistral's config
+    # already omits stream, so removing it makes the lanes agree.
+    for noise, default in (("extra_body", {}), ("stream", False)):
+        if body.get(noise) == default:
+            body.pop(noise, None)
     return dict(body)
 
 

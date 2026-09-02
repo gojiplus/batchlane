@@ -89,11 +89,21 @@ _GROQ = LaneCapabilities(
     input_modes=frozenset({"file"}),
     window=WindowSpec(allowed=("24h", "7d"), default="24h"),
     max_requests=50_000,
-    max_input_bytes=200 * 1024 * 1024,
+    # Groq's own docs disagree: the batch guide says 200MB, the API reference
+    # says 100MB. Taking the smaller, because over-sending is a rejected
+    # upload while under-sending only costs an extra chunk.
+    max_input_bytes=100 * 1024 * 1024,
     result_retention=timedelta(days=30),
     discount_note="50%, restricted to a documented model allowlist",
     discount=0.5,
-    notes=("Docs list 24h and 7d; intermediate window values are undocumented.",),
+    notes=(
+        "Groq documents 'durations from 24h to 7d', so intermediate values "
+        "are likely valid, but the accepted format for them is not given. "
+        "Only the two documented endpoints are allowed here rather than "
+        "guessing at a grammar and earning a 400.",
+        "Its guide and API reference disagree on max file size, 200MB against "
+        "100MB; the smaller is used.",
+    ),
 )
 
 _TOGETHER = LaneCapabilities(
@@ -129,9 +139,8 @@ _DEEPINFRA = LaneCapabilities(
     discount=0.2,
     notes=(
         "Model must be uniform across the file even though it is carried per line.",
-        "Docs describe no list-batches endpoint, but GET on the collection "
-        "answers 401 while a bogus collection answers 404, so it exists. "
-        "Treated as supported; the live tier is what confirms it.",
+        "GET /batches and POST /batches/{id}/cancel are both documented "
+        "(docs.deepinfra.com/batch/batch-endpoints).",
         "Result TTL is caller-set via output_expires_after; no documented default.",
     ),
 )

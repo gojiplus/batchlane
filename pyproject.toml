@@ -115,6 +115,7 @@ link_ignore = [
     # which correctly answer 404 or 401 to the bare GET a link checker makes.
     "https://api.openai.com/*",
     "https://api.groq.com/*",
+    "https://api.together.ai/*",
     "https://api.together.xyz/*",
     "https://api.deepinfra.com/*",
     "https://api.anthropic.com/*",

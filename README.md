@@ -75,7 +75,7 @@ while re-running it costs what the job cost the first time.
 ```python
 >>> p = bl.plan(rows)
 >>> p.n_chunks, p.total_bytes, p.limit_bytes
-(1, 423, 209715200)
+(1, 389, 104857600)
 ```
 
 ```python
@@ -204,7 +204,10 @@ No spend gates and no estimates. Use the gateway you already have for that.
 | DeepInfra | 20% | 24h | no | model must be uniform across the file |
 
 "Live-verified" means a real batch was submitted, polled and read back, with
-answers checked against their inputs. Take the others as untested.
+answers checked against their inputs. Take the others as untested: their wire
+shapes have been checked line by line against each provider's own API
+reference, which is not the same as evidence that they work. The adapter
+module docstrings cite the source for each.
 
 Gemini carries a hazard worth stating plainly: its docs say inline results map
 to requests **by array index**, not by the key you supply. batchlane joins on

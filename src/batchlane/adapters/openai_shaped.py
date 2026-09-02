@@ -7,6 +7,12 @@ data, so each is a :class:`ProviderRow` rather than a subclass.
 
 Everything else -- Gemini, Mistral, Fireworks -- differs structurally and gets
 its own module.
+
+Verified against each provider's own API reference rather than a secondary
+source: developers.openai.com/api/docs/api-reference/batch/create,
+console.groq.com/docs/batch, docs.together.ai/reference/batch-create, and
+docs.deepinfra.com/batch/batch-endpoints. Only OpenAI and Anthropic have been
+exercised against a live API; treat the rest as documented, not proven.
 """
 
 from __future__ import annotations
@@ -68,8 +74,10 @@ ROWS: dict[str, ProviderRow] = {
     ),
     "together_ai": ProviderRow(
         provider="together_ai",
-        base_url="https://api.together.xyz/v1",
+        base_url="https://api.together.ai/v1",
         api_key_env="TOGETHER_API_KEY",
+        # docs.together.ai publishes api.together.ai; api.together.xyz also
+        # resolves today but is not the documented host.
         # Not the OpenAI-standard "batch"; Together rejects that value.
         upload_purpose="batch-api",
         files_path="/files/upload",

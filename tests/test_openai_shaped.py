@@ -177,3 +177,38 @@ def test_openai_is_shipped_and_uses_the_canonical_endpoints():
     assert handle.provider == "openai"
     assert b"batch" in upload.calls[0].request.content
     assert json.loads(create.calls[0].request.content)["completion_window"] == "24h"
+
+
+# Each value below was read from the provider's own API reference. Nothing in
+# the suite pinned these before: every other test reads the row dynamically, so
+# changing a host or a purpose string broke nothing and would have shipped.
+DOCUMENTED_ROWS = {
+    "openai": ("https://api.openai.com/v1", "/files", "batch"),
+    "groq": ("https://api.groq.com/openai/v1", "/files", "batch"),
+    # docs.together.ai publishes api.together.ai, and a non-standard purpose.
+    "together_ai": ("https://api.together.ai/v1", "/files/upload", "batch-api"),
+    # DeepInfra's base path embeds /openai/.
+    "deepinfra": ("https://api.deepinfra.com/v1/openai", "/files", "batch"),
+}
+
+
+@pytest.mark.parametrize(("provider", "documented"), DOCUMENTED_ROWS.items())
+def test_the_row_matches_the_providers_published_api(provider, documented):
+    row = ROWS[provider]
+    assert (row.base_url, row.files_path, row.upload_purpose) == documented
+
+
+def test_every_shipped_openai_shaped_lane_has_its_endpoints_pinned():
+    # A lane added without an entry here would go unverified against its docs.
+    assert set(ROWS) == set(DOCUMENTED_ROWS)
+
+
+def test_the_recovery_key_fits_openais_documented_metadata_limits():
+    # OpenAI caps metadata at 16 pairs, 64-character keys and 512-character
+    # values. The key is stamped there for crash recovery, so it has to fit.
+    from batchlane.adapters.base import KEY_FIELD
+    from batchlane.runner import _chunk_key
+
+    key = _chunk_key([bl.BatchLine("r0", "m", [{"role": "user", "content": "x"}])], 0)
+    assert len(KEY_FIELD) <= 64
+    assert len(key) <= 512

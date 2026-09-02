@@ -11,6 +11,5 @@
     }
   ],
   "model": "deepseek-ai/DeepSeek-V3",
-  "stream": false,
   "temperature": 0.2
 }

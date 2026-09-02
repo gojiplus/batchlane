@@ -11,6 +11,5 @@
     }
   ],
   "model": "llama-3.3-70b-versatile",
-  "stream": false,
   "temperature": 0.2
 }

@@ -20,6 +20,9 @@ Shape notes, all of which differ from the OpenAI-compatible providers:
 v1 submits **inline** requests only (a documented 20MB ceiling). File input
 needs the resumable File API upload and moves the join key to a different
 place in the payload; both are deferred.
+
+Shape verified against ai.google.dev/gemini-api/docs/batch-api. Not yet
+exercised against a live API.
 """
 
 from __future__ import annotations

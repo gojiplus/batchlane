@@ -15,6 +15,9 @@ One thing it does better than every other provider: ``batchInferenceJobId`` is
 a client-settable query parameter, so the submission key becomes the job's own
 id rather than a label attached to it. Resubmitting the same work collides on
 the server, which is the closest thing to true idempotency in this package.
+
+Shape verified against docs.fireworks.ai/guides/batch-inference. Not yet
+exercised against a live API.
 """
 
 from __future__ import annotations
