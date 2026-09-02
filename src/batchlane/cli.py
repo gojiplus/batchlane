@@ -120,6 +120,8 @@ def _cmd_run(args: argparse.Namespace) -> int:
         f"on {chunking.provider} ({chunking.total_bytes} bytes)",
         file=sys.stderr,
     )
+    for caveat in chunking.caveats:
+        print(f"  ! {caveat}", file=sys.stderr)  # noqa: T201 - a CLI
     if args.dry_run:
         cost = chunking.cost
         print(f"  {cost}", file=sys.stderr)  # noqa: T201 - a CLI

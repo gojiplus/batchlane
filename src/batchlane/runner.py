@@ -88,6 +88,43 @@ class ChunkPlan:
         return len(self.chunks)
 
     @property
+    def caveats(self) -> tuple[str, ...]:
+        """What is worth knowing about this job before running it.
+
+        The capability table has always held these, but a reader had to go
+        looking. They belong here, at the moment of deciding, because that is
+        when a surprise is still cheap.
+
+        Returns:
+            One line per caveat, job-specific first, then the lane's own.
+        """
+        from .capabilities import capabilities_for
+
+        caps = capabilities_for(self.provider)
+        if caps is None:
+            return ()
+
+        lines = []
+        if self.n_chunks > 1:
+            lines.append(
+                f"splits into {self.n_chunks} separate provider jobs, each "
+                f"polled and collected independently"
+            )
+        if not caps.supports_cancel:
+            lines.append(f"{self.provider} documents no cancel endpoint")
+        if caps.result_retention is not None:
+            lines.append(
+                f"results are retained {caps.result_retention.days} days, "
+                f"after which they cannot be re-collected"
+            )
+        if caps.discount is None:
+            lines.append(
+                f"{self.provider}'s saving varies by model, so no cost "
+                f"estimate is offered for it"
+            )
+        return tuple(lines) + caps.caveats
+
+    @property
     def cost(self) -> CostEstimate:
         """What this job is likely to cost, batch against sync.
 

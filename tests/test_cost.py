@@ -143,3 +143,51 @@ def test_every_shipped_lane_has_a_documented_discount_recorded():
     # A lane added without one would silently price at full rate.
     missing = set(bl.supported_providers()) - set(DOCUMENTED_DISCOUNTS)
     assert not missing, f"no documented discount recorded for {sorted(missing)}"
+
+
+# --- what a finished job actually cost, not what it was projected to ---
+
+
+def _done(model, prompt_tokens, completion_tokens, tier=None):
+    usage = {"prompt_tokens": prompt_tokens, "completion_tokens": completion_tokens}
+    if tier:
+        usage["service_tier"] = tier
+    return bl.RequestResult("r0", response={"model": model, "usage": usage})
+
+
+def test_actual_cost_is_priced_from_reported_usage_not_a_bound():
+    import litellm
+
+    info = litellm.get_model_info("openai/gpt-4o-mini")
+    got = bl.actual_cost([_done("gpt-4o-mini", 100, 40)], "openai")
+    assert got.measured is True
+    assert (got.input_tokens, got.output_tokens) == (100, 40)
+    assert got.batch_usd == pytest.approx(
+        100 * info["input_cost_per_token_batches"]
+        + 40 * info["output_cost_per_token_batches"]
+    )
+    assert "(actual)" in str(got)
+
+
+def test_a_tier_other_than_batch_says_the_discount_did_not_apply():
+    # The number alone would look like a saving. The provider's own tier field
+    # is the only thing that says whether one actually happened.
+    got = bl.actual_cost(
+        [_done("claude-haiku-4-5-20251001", 10, 5, tier="standard")], "anthropic"
+    )
+    assert got.service_tier == "standard"
+    assert "did not apply" in got.caveat
+
+
+def test_a_batch_tier_is_reported_without_a_complaint():
+    got = bl.actual_cost(
+        [_done("claude-haiku-4-5-20251001", 10, 5, tier="batch")], "anthropic"
+    )
+    assert got.service_tier == "batch"
+    assert "did not apply" not in (got.caveat or "")
+
+
+def test_usage_totals_add_up_across_rows():
+    rows = [_done("gpt-4o-mini", 10, 4) for _ in range(5)]
+    got = bl.actual_cost(rows, "openai")
+    assert (got.input_tokens, got.output_tokens) == (50, 20)

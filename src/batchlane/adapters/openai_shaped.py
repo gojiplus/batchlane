@@ -251,6 +251,15 @@ class OpenAIShapedAdapter(BatchAdapter):
         """
         raw = str(job.get("status", ""))
         counts = job.get(self.row.counts_key) or {} if self.row.counts_key else {}
+        # Together publishes no counts at all, only a percentage. Dropping it
+        # left a running job looking frozen, so it is carried through here and
+        # normalised to the same 0..1 scale the counts produce.
+        percent = job.get("progress")
+        progress = (
+            max(0.0, min(float(percent) / 100.0, 1.0))
+            if isinstance(percent, (int, float))
+            else None
+        )
         return JobStatus(
             state=_STATE_MAP.get(raw.lower(), "running"),
             raw_state=raw,
@@ -258,6 +267,7 @@ class OpenAIShapedAdapter(BatchAdapter):
             succeeded=counts.get("completed"),
             failed=counts.get("failed"),
             error=_first_error(job),
+            progress=progress,
         )
 
     def results(self, handle: BatchHandle, *, api_key: str) -> Iterator[RequestResult]:

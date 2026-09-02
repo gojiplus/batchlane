@@ -95,6 +95,24 @@ class JobStatus:
     failed: int | None = None
     error: str | None = None
     expires_at: datetime | None = None
+    #: Fraction complete, 0.0 to 1.0. Derived from counts where a provider
+    #: reports them, and taken directly where one reports only a percentage.
+    #: Without it a lane that publishes no counts looks frozen while running.
+    progress: float | None = None
+
+    @property
+    def fraction_done(self) -> float | None:
+        """How far along the job is, however the provider expresses it.
+
+        Returns:
+            A value between 0.0 and 1.0, or None when the provider offers
+            neither counts nor a percentage.
+        """
+        if self.progress is not None:
+            return self.progress
+        if self.total:
+            return ((self.succeeded or 0) + (self.failed or 0)) / self.total
+        return None
 
     @property
     def is_terminal(self) -> bool:

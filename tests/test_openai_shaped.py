@@ -212,3 +212,37 @@ def test_the_recovery_key_fits_openais_documented_metadata_limits():
     key = _chunk_key([bl.BatchLine("r0", "m", [{"role": "user", "content": "x"}])], 0)
     assert len(KEY_FIELD) <= 64
     assert len(key) <= 512
+
+
+def test_a_lane_with_no_counts_still_reports_progress():
+    """Together publishes a percentage and no counts at all.
+
+    Discarding it left a running job indistinguishable from a stalled one, so
+    the percentage is carried through and normalised to the same 0..1 scale
+    the counted lanes produce.
+    """
+    together = OpenAIShapedAdapter(ROWS["together_ai"])
+    status = together.parse_status({"status": "IN_PROGRESS", "progress": 42.0})
+    assert status.total is None, "Together genuinely reports no counts"
+    assert status.progress == pytest.approx(0.42)
+    assert status.fraction_done == pytest.approx(0.42)
+
+
+def test_a_counted_lane_derives_the_same_scale():
+    groq = OpenAIShapedAdapter(ROWS["groq"])
+    status = groq.parse_status(
+        {
+            "status": "in_progress",
+            "request_counts": {"total": 10, "completed": 3, "failed": 1},
+        }
+    )
+    # Both lanes answer the same question in the same units, however the
+    # provider happens to express it.
+    assert status.fraction_done == pytest.approx(0.4)
+
+
+def test_progress_is_clamped_to_a_sane_range():
+    together = OpenAIShapedAdapter(ROWS["together_ai"])
+    assert together.parse_status({"status": "x", "progress": 150}).progress == 1.0
+    assert together.parse_status({"status": "x", "progress": -5}).progress == 0.0
+    assert together.parse_status({"status": "x"}).fraction_done is None

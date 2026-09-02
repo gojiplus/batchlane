@@ -70,6 +70,39 @@ weeks (Anthropic 29 days, Gemini 6 weeks, Groq 30 days), so the checkpoint
 stores *handles*, not results: re-reading a finished job costs nothing,
 while re-running it costs what the job cost the first time.
 
+## What will bite you, before it does
+
+```python
+>>> for note in bl.plan(rows).caveats:
+...     print(note)
+inline results are documented as matching requests by array index rather than
+by the key you supply; batchlane joins on an echoed key where present and
+refuses outright when the counts disagree
+the platform enforces a fixed 48h expiry that you cannot set
+```
+
+Lanes differ in ways that change what you should do, not just how the client
+talks to them. `plan()` states the ones that apply to your job, and the CLI
+prints them on every run. `batchlane run ... --dry-run` shows them with the
+cost and the chunking and submits nothing.
+
+## What it actually cost
+
+```python
+>>> results = list(bl.results(handle))
+>>> print(bl.actual_cost(results, "anthropic"))
+~$4.02 at batch rates vs ~$8.04 sync (actual)
+```
+
+`plan().cost` bounds a job before it runs; this prices it from the usage the
+provider reported. Where a provider states a service tier, it is carried back
+too, because "you paid batch rates" is a claim worth checking:
+
+```python
+>>> bl.actual_cost(results, "anthropic").caveat
+"the provider served this at tier 'standard', not 'batch', so the discount did not apply"
+```
+
 ## Will it fit?
 
 ```python

@@ -380,3 +380,41 @@ def test_anthropic_refuses_to_guess_when_recovery_is_ambiguous(monkeypatch):
             expected_rows=2,
             since=datetime(2026, 9, 1, 11, 0, tzinfo=UTC),
         )
+
+
+def test_a_plan_warns_about_the_lane_before_the_job_runs(monkeypatch):
+    # The capability table always held these; a caller had to go looking.
+    monkeypatch.setenv("GEMINI_API_KEY", "k")
+    rows = [
+        bl.BatchLine(
+            "r0", "gemini/gemini-2.5-flash", [{"role": "user", "content": "x"}]
+        )
+    ]
+    caveats = " ".join(bl.plan(rows).caveats).lower()
+    assert "array index" in caveats, "the join hazard must be stated up front"
+    assert "48h" in caveats
+
+
+def test_caveats_carry_user_consequences_not_maintainer_provenance():
+    # `notes` records where a value came from and which doc contradicts which.
+    # That belongs to whoever maintains the lane, not to a caller deciding
+    # whether to run a job.
+    from batchlane.capabilities import CAPABILITIES
+
+    for provider, caps in CAPABILITIES.items():
+        joined = " ".join(caps.caveats).lower()
+        for leak in ("upload purpose", "metadata.state", "api reference", "docs.deep"):
+            assert leak not in joined, (
+                f"{provider} leaks implementation detail to users"
+            )
+
+
+def test_a_split_job_says_so_because_it_changes_what_to_expect(monkeypatch):
+    monkeypatch.setenv("GROQ_API_KEY", "k")
+    caps = CAPABILITIES["groq"]
+    monkeypatch.setitem(CAPABILITIES, "groq", dataclasses.replace(caps, max_requests=2))
+    rows = [
+        bl.BatchLine(f"r{i}", MODEL, [{"role": "user", "content": "x"}])
+        for i in range(5)
+    ]
+    assert any("3 separate provider jobs" in c for c in bl.plan(rows).caveats)

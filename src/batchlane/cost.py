@@ -20,11 +20,11 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Iterable, Sequence
 
-    from .handle import BatchLine
+    from .handle import BatchLine, RequestResult
 
-__all__ = ["CostEstimate", "estimate_cost"]
+__all__ = ["CostEstimate", "actual_cost", "estimate_cost"]
 
 RateSource = Literal["published", "derived", "unknown"]
 
@@ -39,6 +39,13 @@ class CostEstimate:
     sync_usd: float | None
     rate_source: RateSource
     caveat: str | None = None
+    #: True when the token counts came from the provider's own usage report
+    #: rather than from counting the prompts and bounding the output.
+    measured: bool = False
+    #: What the provider says it served this at, where it says anything. A
+    #: value other than "batch" means the discount did not apply, which is
+    #: worth more than the number itself.
+    service_tier: str | None = None
 
     @property
     def saving_usd(self) -> float | None:
@@ -60,7 +67,12 @@ class CostEstimate:
         if self.batch_usd is None or self.sync_usd is None:
             return f"{self.input_tokens:,} input tokens; cost not estimable"
         mark = "~" if self.rate_source != "published" else ""
-        bound = " (upper bound)" if self.output_tokens is not None else " (input only)"
+        if self.measured:
+            bound = " (actual)"
+        elif self.output_tokens is not None:
+            bound = " (upper bound)"
+        else:
+            bound = " (input only)"
         return (
             f"{mark}{_money(self.batch_usd)} at batch rates vs "
             f"{mark}{_money(self.sync_usd)} sync{bound}"
@@ -187,4 +199,58 @@ def estimate_cost(
         sync_usd=total(sync_in, sync_out),
         rate_source=source,
         caveat=caveat,
+    )
+
+
+def actual_cost(results: Iterable[RequestResult], provider: str) -> CostEstimate:
+    """Price a finished job from the usage the provider itself reported.
+
+    The estimate before a run bounds the output; this reads what was actually
+    served. It also carries the service tier back where a provider states one,
+    because "you paid batch rates" is a claim worth checking rather than
+    assuming: Anthropic reports ``usage.service_tier``, and a value other than
+    ``batch`` means the discount did not apply.
+
+    Args:
+        results: The finished job's results.
+        provider: LiteLLM provider key.
+
+    Returns:
+        The cost, with ``measured`` set so a reader can tell it apart from an
+        estimate.
+    """
+    input_tokens = output_tokens = 0
+    model = ""
+    tiers: set[str] = set()
+    for result in results:
+        body = result.response if isinstance(result.response, dict) else None
+        if not body:
+            continue
+        model = model or str(body.get("model", ""))
+        usage = body.get("usage") or {}
+        input_tokens += int(
+            usage.get("prompt_tokens") or usage.get("input_tokens") or 0
+        )
+        output_tokens += int(
+            usage.get("completion_tokens") or usage.get("output_tokens") or 0
+        )
+        if tier := usage.get("service_tier"):
+            tiers.add(str(tier))
+
+    sync_in, sync_out, batch_in, batch_out, source, caveat = _rates(model, provider)
+    served = ", ".join(sorted(tiers)) if tiers else None
+    if served and served != "batch":
+        caveat = (
+            f"the provider served this at tier {served!r}, not 'batch', so the "
+            f"discount did not apply"
+        )
+    return CostEstimate(
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        batch_usd=input_tokens * batch_in + output_tokens * batch_out,
+        sync_usd=input_tokens * sync_in + output_tokens * sync_out,
+        rate_source=source,
+        caveat=caveat,
+        measured=True,
+        service_tier=served,
     )

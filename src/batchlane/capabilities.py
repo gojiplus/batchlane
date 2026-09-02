@@ -60,7 +60,13 @@ class LaneCapabilities:
     #: provider publishes none. None means the saving is too model-dependent
     #: to express as one number, and no estimate should claim otherwise.
     discount: float | None = None
+    #: Provenance and implementation detail, for whoever maintains the lane.
+    #: Where a value came from, which doc contradicts which. Not for callers.
     notes: tuple[str, ...] = field(default_factory=tuple)
+    #: Things that change what a caller should do or expect. Surfaced by
+    #: ChunkPlan.caveats before a job runs, because a surprise is only cheap
+    #: while it is still in front of you.
+    caveats: tuple[str, ...] = field(default_factory=tuple)
 
 
 # The reference implementation of the shape every other OpenAI-compatible lane
@@ -104,6 +110,7 @@ _GROQ = LaneCapabilities(
         "Its guide and API reference disagree on max file size, 200MB against "
         "100MB; the smaller is used.",
     ),
+    caveats=("the 50% discount covers a documented model allowlist, not every model",),
 )
 
 _TOGETHER = LaneCapabilities(
@@ -124,6 +131,10 @@ _TOGETHER = LaneCapabilities(
         "Reports a single progress float rather than a request_counts object.",
         "Result retention is not documented; confirm on a live run.",
     ),
+    caveats=(
+        "reports overall progress but no per-row counts",
+        "several models are excluded from batch entirely",
+    ),
 )
 
 _DEEPINFRA = LaneCapabilities(
@@ -143,6 +154,7 @@ _DEEPINFRA = LaneCapabilities(
         "(docs.deepinfra.com/batch/batch-endpoints).",
         "Result TTL is caller-set via output_expires_after; no documented default.",
     ),
+    caveats=("every row in one job must name the same model",),
 )
 
 _MISTRAL = LaneCapabilities(
@@ -162,6 +174,7 @@ _MISTRAL = LaneCapabilities(
         "Batch path is /v1/batch/jobs, not /v1/batches.",
         "Result retention and discount exclusions are undocumented.",
     ),
+    caveats=("the model belongs to the job, so one job cannot mix models",),
 )
 
 _GEMINI = LaneCapabilities(
@@ -186,6 +199,12 @@ _GEMINI = LaneCapabilities(
         "State is nested at metadata.state with JOB_STATE_* values; a "
         "BATCH_STATE_* enum in the REST reference appears to be stale.",
     ),
+    caveats=(
+        "inline results are documented as matching requests by array index "
+        "rather than by the key you supply; batchlane joins on an echoed key "
+        "where present and refuses outright when the counts disagree",
+        "the platform enforces a fixed 48h expiry that you cannot set",
+    ),
 )
 
 _FIREWORKS = LaneCapabilities(
@@ -204,6 +223,10 @@ _FIREWORKS = LaneCapabilities(
         "No cancel endpoint is documented; cancel() refuses rather than no-ops.",
         "Input is a registered dataset, not a file upload.",
         "Window is maxJobDuration, an integer bounded to [12h, 72h].",
+    ),
+    caveats=(
+        "requires FIREWORKS_ACCOUNT_ID; every URL is account-scoped",
+        "the model belongs to the job, so one job cannot mix models",
     ),
 )
 
@@ -233,6 +256,10 @@ _ANTHROPIC = LaneCapabilities(
         "Results are JSONL of {custom_id, result:{type, message}} and arrive "
         "out of submission order, so they must be joined on custom_id.",
         "usage.service_tier == 'batch' confirms the discount lane was used.",
+    ),
+    caveats=(
+        "gives a batch no label, so a submission interrupted before it was "
+        "recorded can only be matched approximately on time and row count",
     ),
 )
 
