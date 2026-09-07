@@ -499,3 +499,17 @@ def test_duplicate_request_ids_are_rejected():
 def test_invalid_requested_chunk_cap_is_rejected(cap):
     with pytest.raises(bl.BatchlaneError, match="positive"):
         bl.plan(_lines(1), max_requests_per_batch=cap)
+
+
+@respx.mock
+def test_readonly_parameter_mapping_can_submit_and_resume(groq_key, tmp_path):
+    from types import MappingProxyType
+
+    _mock_one_job(["r0"])
+    lines = [
+        dataclasses.replace(_lines(1)[0], params=MappingProxyType({"temperature": 0.0}))
+    ]
+    checkpoint = tmp_path / "job.jsonl"
+    first = bl.submit_all(lines, checkpoint=checkpoint)
+    second = bl.submit_all(lines, checkpoint=checkpoint)
+    assert first == second

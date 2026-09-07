@@ -17,7 +17,7 @@ import hashlib
 import json
 import os
 import time
-from dataclasses import asdict, dataclass, replace
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -49,6 +49,23 @@ _BACKOFF_CAP_SECONDS = 900.0
 _BACKOFF_FACTOR = 2.0
 
 
+def _line_identity(line: BatchLine) -> dict[str, object]:
+    """Serialize request identity without copying opaque Mapping implementations.
+
+    Args:
+        line: One input request.
+
+    Returns:
+        JSON-compatible request fields.
+    """
+    return {
+        "custom_id": line.custom_id,
+        "model": line.model,
+        "messages": line.messages,
+        "params": dict(line.params),
+    }
+
+
 def _chunk_key(lines: Sequence[BatchLine], index: int) -> str:
     """Derive a stable submission key from a chunk's content.
 
@@ -63,7 +80,7 @@ def _chunk_key(lines: Sequence[BatchLine], index: int) -> str:
     Returns:
         A key short enough for a provider label field.
     """
-    material = json.dumps([asdict(line) for line in lines], sort_keys=True)
+    material = json.dumps([_line_identity(line) for line in lines], sort_keys=True)
     digest = hashlib.sha256(material.encode()).hexdigest()[:16]
     return f"bl-{digest}-{index}"
 
@@ -414,7 +431,8 @@ def submit_all(
                 "endpoint": endpoint,
                 "window": window,
                 "chunks": [
-                    [asdict(line) for line in chunk] for chunk in chunking.chunks
+                    [_line_identity(line) for line in chunk]
+                    for chunk in chunking.chunks
                 ],
             },
             sort_keys=True,
