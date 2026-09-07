@@ -17,11 +17,11 @@ jobs:
     steps:
       # SHA-pinned: a tag is mutable, and this job holds provider API keys.
       # Dependabot bumps these by SHA and records the version in the comment.
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
           python-version: "3.13"
-      - run: uv sync --all-extras
+      - run: uv sync --group test --all-extras
       - run: uv run pytest -m live -v
         env:
           BATCHLANE_LIVE: "1"

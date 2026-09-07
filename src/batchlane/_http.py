@@ -68,6 +68,7 @@ def request(
     json_body: Any = None,
     files: Any = None,
     data: Any = None,
+    content: bytes | None = None,
     params: dict[str, Any] | None = None,
     timeout: httpx.Timeout | None = None,
 ) -> httpx.Response:
@@ -80,6 +81,7 @@ def request(
         json_body: JSON payload, if any.
         files: Multipart file payload, if any.
         data: Form fields accompanying a multipart upload.
+        content: Raw bytes for a resumable upload.
         params: Query string parameters.
         timeout: Override the default timeout.
 
@@ -97,6 +99,7 @@ def request(
             json=json_body,
             files=files,
             data=data,
+            content=content,
             params=params,
         )
     if response.status_code >= 400:

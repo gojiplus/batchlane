@@ -17,7 +17,7 @@ import hashlib
 import json
 import os
 import time
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -33,7 +33,7 @@ if TYPE_CHECKING:
     from .cost import CostEstimate
     from .handle import JobStatus
 
-__all__ = ["ChunkPlan", "answer_text", "map", "plan", "run", "wait"]
+__all__ = ["ChunkPlan", "answer_text", "map", "plan", "run", "submit_all", "wait"]
 
 #: Headroom under a provider's byte cap. Per-line measurement is a slight
 #: overestimate of marginal cost, but envelope overhead and any provider-side
@@ -63,7 +63,7 @@ def _chunk_key(lines: Sequence[BatchLine], index: int) -> str:
     Returns:
         A key short enough for a provider label field.
     """
-    material = "|".join(f"{line.custom_id}:{line.model}" for line in lines)
+    material = json.dumps([asdict(line) for line in lines], sort_keys=True)
     digest = hashlib.sha256(material.encode()).hexdigest()[:16]
     return f"bl-{digest}-{index}"
 
@@ -165,6 +165,8 @@ def _prepare(
 
     if not lines:
         raise BatchlaneError("Cannot submit an empty batch.")
+    if len({line.custom_id for line in lines}) != len(lines):
+        raise BatchlaneError("Each request must have a unique custom_id.")
     resolved = [adapter_for_model(line.model) for line in lines]
     providers = {provider for _a, provider, _b in resolved}
     if len(providers) > 1:
@@ -181,7 +183,10 @@ def _prepare(
 
 
 def plan(
-    lines: Sequence[BatchLine], *, endpoint: str = "chat.completions"
+    lines: Sequence[BatchLine],
+    *,
+    endpoint: str = "chat.completions",
+    max_requests_per_batch: int | None = None,
 ) -> ChunkPlan:
     """Work out how a job would be split, without submitting anything.
 
@@ -192,6 +197,7 @@ def plan(
     Args:
         lines: The requests to run.
         endpoint: Which endpoint the lines target.
+        max_requests_per_batch: Optional request cap below the provider limit.
 
     Returns:
         The chunking that :func:`run` would use.
@@ -205,6 +211,10 @@ def plan(
     sizes = [adapter.payload_bytes([line], endpoint=endpoint) for line in bare]
     budget = int(caps.max_input_bytes * _SAFETY) if caps.max_input_bytes else None
     max_n = caps.max_requests
+    if max_requests_per_batch is not None:
+        if max_requests_per_batch < 1:
+            raise BatchlaneError("max_requests_per_batch must be positive.")
+        max_n = min(max_n, max_requests_per_batch) if max_n else max_requests_per_batch
 
     for line, size in zip(bare, sizes, strict=True):
         if budget is not None and size > budget:
@@ -276,7 +286,12 @@ def wait(
                 f"{current.raw_state!r} after {timeout}s. The job is not lost; "
                 f"poll it again with this handle."
             )
-        time.sleep(interval)
+        delay = (
+            interval
+            if deadline is None
+            else min(interval, max(0, deadline - time.monotonic()))
+        )
+        time.sleep(delay)
         interval = min(interval * _BACKOFF_FACTOR, _BACKOFF_CAP_SECONDS)
 
 
@@ -351,45 +366,76 @@ def _append_checkpoint(
     with path.open("a") as fh:
         fh.write(json.dumps(record) + "\n")
         fh.flush()
+        os.fsync(fh.fileno())
 
 
-def run(
+def submit_all(
     lines: Sequence[BatchLine],
     *,
     endpoint: str = "chat.completions",
     window: str | None = None,
     api_key: str | None = None,
     checkpoint: str | Path | None = None,
-    poll_interval: float = DEFAULT_POLL_SECONDS,
-    timeout: float | None = None,
-) -> Iterator[tuple[BatchLine, RequestResult]]:
-    """Run a job end to end and stream each input row beside its answer.
+    max_requests_per_batch: int | None = None,
+) -> list[BatchHandle]:
+    """Submit every chunk without waiting for inference to finish.
 
-    Splits to fit the provider's caps, submits the pieces, waits, and joins
-    results back to the rows that produced them. With ``checkpoint`` set, a
-    crash or timeout resumes against the same provider jobs rather than
-    re-running inference.
+    With a checkpoint, repeat the identical call to resume interrupted
+    submissions. A changed request or setting is rejected before provider I/O.
+    Keep the checkpoint private and use only one writer at a time.
 
     Args:
-        lines: The requests to run. All must target one provider.
+        lines: Requests for one provider, with unique custom IDs.
         endpoint: Which endpoint the lines target.
-        window: Requested turnaround, or None for the provider default.
-        api_key: Credential, or None to read it from the environment.
-        checkpoint: Path to record submitted jobs, enabling resume.
-        poll_interval: Seconds between polls.
-        timeout: Give up on a chunk after this long, or None to wait.
+        window: Requested turnaround, or the provider default.
+        api_key: Credential, or None to read the environment.
+        checkpoint: Durable submission journal; required for crash recovery.
+        max_requests_per_batch: Optional request cap below the provider limit.
 
-    Yields:
-        tuple[BatchLine, RequestResult]: pairs in chunk-completion order.
-            The line is the caller's own, so no joining is needed.
+    Returns:
+        One handle per chunk, in the order returned by :func:`plan`.
+
+    Raises:
+        BatchlaneError: If the checkpoint belongs to different work.
     """
     adapter, provider, _bare = _prepare(lines)
     key = resolve_api_key(provider, api_key)
-    by_id = {line.custom_id: line for line in lines}
 
-    chunking = plan(lines, endpoint=endpoint)
+    chunking = plan(
+        lines, endpoint=endpoint, max_requests_per_batch=max_requests_per_batch
+    )
+    for chunk in chunking.chunks:
+        adapter.check(chunk, endpoint=endpoint, window=window)
     path = Path(checkpoint) if checkpoint else None
+    if path is not None:
+        material = json.dumps(
+            {
+                "provider": provider,
+                "endpoint": endpoint,
+                "window": window,
+                "chunks": [
+                    [asdict(line) for line in chunk] for chunk in chunking.chunks
+                ],
+            },
+            sort_keys=True,
+        )
+        fingerprint = hashlib.sha256(material.encode()).hexdigest()
+        header = {"version": 1, "fingerprint": fingerprint}
+        if path.exists() and path.stat().st_size:
+            first = path.read_text().splitlines()[0]
+            if json.loads(first) != header:
+                raise BatchlaneError(
+                    "The checkpoint belongs to different requests or settings; "
+                    "use a new checkpoint."
+                )
+        else:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with path.open("w") as fh:
+                fh.write(json.dumps(header) + "\n")
+                fh.flush()
+                os.fsync(fh.fileno())
     known, intents = _read_checkpoint(path) if path else ({}, {})
+    handles = []
 
     for index, chunk in enumerate(chunking.chunks):
         handle = known.get(index)
@@ -428,6 +474,48 @@ def run(
                         path, index, handle, [ln.custom_id for ln in chunk]
                     )
 
+        handles.append(handle)
+    return handles
+
+
+def run(
+    lines: Sequence[BatchLine],
+    *,
+    endpoint: str = "chat.completions",
+    window: str | None = None,
+    api_key: str | None = None,
+    checkpoint: str | Path | None = None,
+    poll_interval: float = DEFAULT_POLL_SECONDS,
+    timeout: float | None = None,
+) -> Iterator[tuple[BatchLine, RequestResult]]:
+    """Run a job end to end and stream each input row beside its answer.
+
+    Splits to fit the provider's caps, submits the pieces, waits, and joins
+    results back to the rows that produced them. With ``checkpoint`` set, a
+    crash or timeout resumes against the same provider jobs rather than
+    re-running inference.
+
+    Args:
+        lines: The requests to run. All must target one provider.
+        endpoint: Which endpoint the lines target.
+        window: Requested turnaround, or None for the provider default.
+        api_key: Credential, or None to read it from the environment.
+        checkpoint: Path to record submitted jobs, enabling resume.
+        poll_interval: Seconds between polls.
+        timeout: Give up on a chunk after this long, or None to wait.
+
+    Yields:
+        tuple[BatchLine, RequestResult]: pairs in chunk-completion order.
+            The line is the caller's own, so no joining is needed.
+    """
+    adapter, provider, _bare = _prepare(lines)
+    key = resolve_api_key(provider, api_key)
+    by_id = {line.custom_id: line for line in lines}
+    chunking = plan(lines, endpoint=endpoint)
+    handles = submit_all(
+        lines, endpoint=endpoint, window=window, api_key=key, checkpoint=checkpoint
+    )
+    for chunk, handle in zip(chunking.chunks, handles, strict=True):
         final = wait(handle, poll_interval=poll_interval, timeout=timeout, api_key=key)
         yield from _pairs(adapter, handle, final, chunk, by_id, key)
 
@@ -454,10 +542,18 @@ def _pairs(
         tuple[BatchLine, RequestResult]: pairs, including a synthesised
             error for any row the provider never answered -- silence is not
             success.
+
+    Raises:
+        BatchlaneError: If results contain duplicate IDs or IDs from another chunk.
     """
     seen: set[str] = set()
+    expected = {line.custom_id for line in chunk}
     if final.state == "succeeded":
         for result in adapter.results(handle, api_key=api_key):
+            if result.custom_id not in expected or result.custom_id in seen:
+                raise BatchlaneError(
+                    f"Unexpected or duplicate result ID: {result.custom_id!r}"
+                )
             seen.add(result.custom_id)
             line = by_id.get(result.custom_id)
             if line is not None:

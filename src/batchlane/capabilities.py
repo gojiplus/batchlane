@@ -181,12 +181,10 @@ _GEMINI = LaneCapabilities(
     provider="gemini",
     endpoints=frozenset({CHAT}),
     model_scope="url",
-    # v1 implements inline submission only, so the descriptor advertises the
-    # 20MB inline ceiling rather than the 2GB one that needs the File API.
-    input_modes=frozenset({"inline"}),
+    input_modes=frozenset({"inline", "file"}),
     window=None,
     max_requests=None,
-    max_input_bytes=20 * 1024 * 1024,
+    max_input_bytes=2_000_000_000,
     result_retention=timedelta(weeks=6),
     discount_note="50%",
     discount=0.5,

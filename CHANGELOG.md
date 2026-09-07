@@ -1,30 +1,20 @@
 # Changelog
 
-All notable changes to this project are documented here.
-The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/).
-
 ## [Unreleased]
 
-### Added
+## 0.1.0 — 2026-09-07
 
-- `run()`, `wait()` and `plan()`: split a job to fit the provider's caps,
-  submit the pieces, wait, and stream each input row beside its answer.
-  With `checkpoint=` set, a crash resumes against the jobs already submitted
-  rather than re-running inference.
-- Batch lanes for Anthropic, Gemini AI Studio, OpenAI, Groq, Together and
-  DeepInfra.
-- `capabilities_for()`, describing each lane precisely enough to gate on:
-  result retention, whether cancel exists, whether the completion window is
-  the caller's to set, and per-endpoint support.
+Initial PyPI release.
 
-### Notes
-
-- Gemini AI Studio is the gap this package exists to close. LiteLLM can batch
-  Gemini models through Vertex AI but not through AI Studio, so the same model
-  behind the same 50% discount is reachable with GCP credentials and
-  unreachable with a `GEMINI_API_KEY`.
-- Azure, Vertex AI and Bedrock are deliberately unshipped because LiteLLM
-  already reaches them; batchlane says so rather than reporting no lane.
-- Only Anthropic is live-verified end to end. Treat the other lanes as
-  untested against a real API.
+- Batch adapters for Anthropic, Gemini AI Studio, OpenAI, Groq, Mistral,
+  Fireworks, Together, and DeepInfra.
+- Request planning, provider capability checks, cost estimates, and an optional
+  OpenAI-compatible HTTP gateway.
+- `submit_all()` submits all chunks without waiting; `run()` submits all chunks
+  before polling. Checkpoints reject changed inputs and settings.
+- Gemini automatically switches from inline requests to keyed file input for
+  batches at or above 20MB, and collects keyed JSONL results.
+- Only Anthropic has been verified against a live provider API. Other adapters,
+  including Gemini file uploads, are covered by mocked contract tests.
+- Checkpoint recovery depends on provider support and does not guarantee
+  exactly-once submission. Save answers locally beyond provider retention.
