@@ -272,7 +272,7 @@ and which endpoints the lane covers.
 Use the interface that supports the provider and account you need. Batchlane
 provides its own provider adapters, request planning, and resumable submissions.
 It uses LiteLLM for request and response conversion; see the
-[LiteLLM batch documentation](https://docs.litellm.ai/docs/batch) for its current
+[LiteLLM batch documentation](https://docs.litellm.ai/docs/batches) for its current
 provider support.
 
 `batchlane` depends on LiteLLM the *library* and ignores LiteLLM the gateway.
