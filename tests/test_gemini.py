@@ -200,3 +200,136 @@ def test_cancel_uses_the_rpc_colon_suffix_not_a_subpath():
     )
     ADAPTER.cancel(_handle(), api_key="k")
     assert route.called
+
+
+@respx.mock
+def test_large_batch_uploads_jsonl_then_collects_keyed_file_results(monkeypatch):
+    from batchlane.adapters import gemini
+
+    monkeypatch.setattr(gemini, "INLINE_LIMIT", 1)
+    start = respx.post(gemini.UPLOAD_URL).mock(
+        return_value=httpx.Response(
+            200, headers={"x-goog-upload-url": "https://upload.invalid/session"}
+        )
+    )
+    upload = respx.post("https://upload.invalid/session").mock(
+        return_value=httpx.Response(200, json={"file": {"name": "files/input"}})
+    )
+    submit = respx.post(f"{BASE_URL}/models/{MODEL}:batchGenerateContent").mock(
+        return_value=httpx.Response(200, json={"name": "batches/file-job"})
+    )
+    handle = ADAPTER.submit(
+        [_line("r1", "hi"), _line("r2", "yo")],
+        endpoint="chat.completions",
+        window=None,
+        api_key="k",
+    )
+    assert handle.lane == "batch_file"
+    records = [
+        json.loads(line) for line in upload.calls[0].request.content.splitlines()
+    ]
+    assert [r["key"] for r in records] == ["r1", "r2"]
+    assert all("contents" in r["request"] for r in records)
+    assert int(
+        start.calls[0].request.headers["x-goog-upload-header-content-length"]
+    ) == len(upload.calls[0].request.content)
+    assert "x-goog-api-key" not in upload.calls[0].request.headers
+    assert json.loads(submit.calls[0].request.content)["batch"]["input_config"] == {
+        "file_name": "files/input"
+    }
+    respx.get(f"{BASE_URL}/batches/file-job").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "response": {"responsesFile": "files/output"},
+                "metadata": {"state": "JOB_STATE_SUCCEEDED"},
+            },
+        )
+    )
+    respx.get(
+        f"{gemini.DOWNLOAD_URL}/files/output:download", params={"alt": "media"}
+    ).mock(
+        return_value=httpx.Response(
+            200,
+            text="\n".join(
+                [
+                    json.dumps({"key": "r2", "error": {"code": 429}}),
+                    json.dumps({"key": "r1", "response": _reply("first")}),
+                ]
+            ),
+        )
+    )
+    got = list(ADAPTER.results(bl.BatchHandle.from_json(handle.to_json()), api_key="k"))
+    assert [r.custom_id for r in got] == ["r2", "r1"]
+    assert not got[0].ok
+    assert bl.answer_text(got[1]) == "first"
+
+
+@respx.mock
+@pytest.mark.parametrize(
+    "rows",
+    [[{"response": {}}], [{"key": "r1", "error": {}}, {"key": "r1", "error": {}}]],
+)
+def test_file_results_refuse_missing_or_duplicate_keys(rows):
+    from batchlane.adapters.gemini import DOWNLOAD_URL
+
+    respx.get(f"{BASE_URL}/batches/abc").mock(
+        return_value=httpx.Response(
+            200, json={"response": {"responsesFile": "files/output"}}
+        )
+    )
+    respx.get(f"{DOWNLOAD_URL}/files/output:download", params={"alt": "media"}).mock(
+        return_value=httpx.Response(200, text="\n".join(json.dumps(r) for r in rows))
+    )
+    with pytest.raises(RuntimeError, match="missing or duplicate key"):
+        list(ADAPTER.results(_handle(), api_key="k"))
+
+
+@respx.mock
+@pytest.mark.parametrize("file_input", [False, True])
+def test_crash_recovery_finds_nested_label_and_restores_result_identity(
+    tmp_path, monkeypatch, file_input
+):
+    from batchlane import runner
+
+    monkeypatch.setenv("GEMINI_API_KEY", "k")
+    saved = []
+
+    def submit(request):
+        saved.append(json.loads(request.content)["batch"]["display_name"])
+        return httpx.Response(200, json={"name": "batches/paid"})
+
+    submits = respx.post(f"{BASE_URL}/models/{MODEL}:batchGenerateContent").mock(
+        side_effect=submit
+    )
+
+    def listing(request):
+        meta = {"displayName": saved[0], "model": f"models/{MODEL}"}
+        if file_input:
+            meta["inputConfig"] = {"fileName": "files/input"}
+        return httpx.Response(
+            200, json={"operations": [{"name": "batches/paid", "metadata": meta}]}
+        )
+
+    respx.get(f"{BASE_URL}/batches").mock(side_effect=listing)
+    real_append = runner._append_checkpoint
+
+    def crash(*args):
+        raise RuntimeError("stopped before receipt")
+
+    monkeypatch.setattr(runner, "_append_checkpoint", crash)
+    lines = [bl.BatchLine("r1", f"gemini/{MODEL}", [{"role": "user", "content": "hi"}])]
+    checkpoint = tmp_path / "job.jsonl"
+    with pytest.raises(RuntimeError, match="stopped"):
+        bl.submit_all(lines, checkpoint=checkpoint)
+    monkeypatch.setattr(runner, "_append_checkpoint", real_append)
+    handles = bl.submit_all(lines, checkpoint=checkpoint)
+    assert submits.call_count == 1
+    assert handles[0].model == MODEL
+    assert handles[0].lane == ("batch_file" if file_input else "batch_inline")
+    assert json.loads(handles[0].extra["keys"]) == ["r1"]
+    respx.get(f"{BASE_URL}/batches/paid").mock(
+        return_value=httpx.Response(200, json=_job([{"response": _reply("first")}]))
+    )
+    got = list(bl.results(handles[0]))
+    assert [(r.custom_id, bl.answer_text(r)) for r in got] == [("r1", "first")]

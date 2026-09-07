@@ -1,16 +1,17 @@
 # batchlane
 
-Run batch inference at every provider's discount rate, through one interface.
+Submit asynchronous LLM batch jobs through one interface.
 
-Nine providers sell latency-insensitive inference at roughly half price through
-an asynchronous batch lane. LiteLLM, which most people route through, can
-submit a batch to one of them. So bulk work sent through the gateway pays full
-price, and the fix is per-provider plumbing nobody wants to write.
+Eight adapters cover Anthropic, Gemini AI Studio, OpenAI, Groq, Mistral,
+Fireworks, Together, and DeepInfra. Batch pricing, model availability, and
+turnaround depend on the provider. Only Anthropic has been verified end to end
+against a live API; the other adapters have mocked contract tests.
 
 ```python
 import batchlane as bl
 
 model = "groq/llama-3.3-70b-versatile"
+prompts = ["The product was great.", "It broke in a week."]
 answers = bl.map(model, prompts, system="Classify the sentiment.")
 ```
 
@@ -49,36 +50,47 @@ for line, result in bl.run(rows, checkpoint="job.jsonl"):
     print(line.custom_id, bl.answer_text(result))
 ```
 
-It streams, so a 50,000-row job never sits in memory.
+Results are yielded one row at a time. Requests and downloaded provider output
+are currently buffered in memory; size jobs to fit your machine.
 
 What that buys you:
 
 | | |
 |---|---|
-| **Half price, where it exists** | 50% on Anthropic, Gemini, OpenAI, Groq and Together; 20% on DeepInfra |
+| **Provider batch pricing** | Discounts and model exclusions vary; see the provider table below |
 | **One code path** | chunking, polling, and joining results back to rows are handled |
-| **Resumable** | a crash re-attaches to submitted jobs instead of paying for them twice |
+| **Resumable** | recorded handles reattach to submitted jobs; recovery limits are described below |
 | **Honest about limits** | refuses where no lane exists rather than emulating one, and distinguishes "no lane" from "not built yet" |
 
-## Resuming does not re-pay
+## Resume submitted jobs
 
-With `checkpoint=` set, every submitted job is recorded before anything that
-could fail. If the process dies, rerun the identical call: batchlane
-re-attaches to the jobs it already submitted and re-reads their output rather
-than running inference again. That works because providers retain results for
-weeks (Anthropic 29 days, Gemini 6 weeks, Groq 30 days), so the checkpoint
-stores *handles*, not results: re-reading a finished job costs nothing,
-while re-running it costs what the job cost the first time.
+With `checkpoint=` set, batchlane records an intent before each submission and
+saves the returned handle immediately. Repeating the identical call reattaches
+to recorded jobs. Changed requests, model parameters, ordering, or job settings
+are rejected; use a new checkpoint for new work. Use one writer per checkpoint.
+
+If a submission may have succeeded but no handle was saved, recovery depends
+on the provider's listing and matching support. It is not an exactly-once
+guarantee. Providers retain results for a limited time, so save collected answers
+locally if you need them beyond that window. Checkpoints store handles, not answers.
+
+`run()` submits every chunk before waiting. To submit now and collect later:
+
+```python
+handles = bl.submit_all(rows, checkpoint="job.jsonl")
+for handle in handles:
+    if bl.status(handle).state == "succeeded":
+        for result in bl.results(handle):
+            print(result.custom_id, bl.answer_text(result))
+```
+
+`plan(rows).chunks` describes which requests each handle covers.
 
 ## What will bite you, before it does
 
 ```python
->>> for note in bl.plan(rows).caveats:
-...     print(note)
-inline results are documented as matching requests by array index rather than
-by the key you supply; batchlane joins on an echoed key where present and
-refuses outright when the counts disagree
-the platform enforces a fixed 48h expiry that you cannot set
+for note in bl.plan(rows).caveats:
+    print(note)
 ```
 
 Lanes differ in ways that change what you should do, not just how the client
@@ -89,57 +101,41 @@ cost and the chunking and submits nothing.
 ## What it actually cost
 
 ```python
->>> results = list(bl.results(handle))
->>> print(bl.actual_cost(results, "anthropic"))
-~$4.02 at batch rates vs ~$8.04 sync (actual)
+results = list(bl.results(handle))
+print(bl.actual_cost(results, handle.provider))
 ```
 
-`plan().cost` bounds a job before it runs; this prices it from the usage the
-provider reported. Where a provider states a service tier, it is carried back
-too, because "you paid batch rates" is a claim worth checking:
-
-```python
->>> bl.actual_cost(results, "anthropic").caveat
-"the provider served this at tier 'standard', not 'batch', so the discount did not apply"
-```
+`plan().cost` estimates a job before it runs; `actual_cost()` prices usage
+reported by the provider. Where a provider returns a service tier, the cost
+report carries a caveat if that tier differs from batch pricing.
 
 ## Will it fit?
 
 ```python
->>> p = bl.plan(rows)
->>> p.n_chunks, p.total_bytes, p.limit_bytes
-(1, 389, 104857600)
+p = bl.plan(rows)
+print(p.n_chunks, p.total_bytes, p.limit_bytes)
+print(p.cost)
 ```
 
-```python
->>> print(bl.plan(rows).cost)
-~$53.57 at batch rates vs ~$107.14 sync (upper bound)
-```
+The `~` marks a derived rate. Where batch rates are absent from LiteLLM's price
+registry, batchlane applies the provider discount in its capability table.
+Together has no estimate because its discount varies by model. Output length
+is unknown before inference; `max_tokens` bounds the output estimate, while its
+absence limits the estimate to input tokens. These estimates are not quotes
+or spending limits.
 
-The `~` means the rate was derived rather than published. Only OpenAI's batch
-rates appear in litellm's price registry; for the rest batchlane applies the
-provider's documented discount to its synchronous rate and says so. Together
-gets no estimate at all, because "up to 50% with some models excluded" cannot
-honestly be one multiplier. And output length is not knowable before a job
-runs, so `max_tokens` makes the figure an upper bound and its absence limits
-the estimate to the input side.
-
-Gemini's inline lane caps at 20MB — an order of magnitude below the
-file-based providers and with no request cap at all — so a job that is one
-batch on Groq can be a dozen on Gemini. `plan()` tells you before you spend.
-
-batchlane deliberately does **not** try to pick a chunk size for faster
-turnaround. That depends on the provider's queue depth, which is invisible and
-volatile: the same Anthropic account returned one batch in 200 seconds and the
-next in over ten minutes. Fitting the caps is well defined; optimising latency
-would be a guess dressed as a feature.
+Gemini uses inline requests below 20MB and switches to keyed JSONL file input
+for larger batches, with a 2GB provider file limit. `plan()` includes request
+and byte limits when splitting work. You can request smaller chunks with
+`plan(rows, max_requests_per_batch=1000)` and use the same argument on
+`submit_all()`.
 
 ## The primitives are still there
 
-`run()` is built on them, not instead of them:
+For a single batch:
 
 ```python
-handle = bl.submit(rows)  # -> BatchHandle, JSON-serialisable
+handle = bl.submit(rows)  # -> BatchHandle, JSON-serializable
 open("job.json", "w").write(handle.to_json())
 bl.wait(handle)  # poll until terminal
 list(bl.results(handle))  # joined on your custom_id
@@ -175,8 +171,8 @@ real `openai` package against the app rather than a client of our own.
 the client boundary, so the `batch_id` carries the compressed handles rather
 than pointing at a row: one process, no database, no migrations, nothing lost
 on restart. Uploaded files do go to disk, because a file must survive until a
-batch references it, and a job past roughly 200 chunks spills its handles to
-disk because the id would no longer fit in a URL. `GET /v1/batches` returns an
+batch references it, and sufficiently large handle collections spill to disk when their encoded
+IDs exceed the gateway limit. `GET /v1/batches` returns an
 empty list, since a server holding nothing has nothing to enumerate.
 
 **Running it exposes spending authority.** The gateway submits jobs with your
@@ -201,34 +197,24 @@ A solo user never has to run any of this; the library alone is enough.
 
 ### It does not emulate a batch
 
-A discount exists because the provider
-backfills otherwise-idle GPUs, which requires owning a fleet with a demand
-trough. A reseller buying capacity at retail structurally cannot offer one.
-Running your requests concurrently against a synchronous endpoint and calling
-the result a "batch" would save nothing while implying half price, isolated
-rate limits and a 24-hour window. So it refuses, and says why:
-
-```python
->>> bl.get_adapter("openrouter")
-NoBatchLaneError: 'openrouter' has no asynchronous batch lane: It resells
-upstream capacity at retail, so it has no idle fleet to backfill and cannot
-price a discount lane. Providers with a lane: anthropic, deepinfra,
-fireworks_ai, gemini, groq, mistral, openai, together_ai.
-```
+Batchlane does not send concurrent synchronous requests as a substitute for a
+provider batch API. It raises `NoBatchLaneError` for providers classified as
+having no lane and `AdapterNotShippedError` where an adapter is missing.
 
 A provider whose lane exists but is unimplemented gets a *different* error, so
 a refusal never claims a lane is absent when it is merely unwritten.
 
-### It does not track cost
+### It does not enforce a spending budget
 
-No spend gates and no estimates. Use the gateway you already have for that.
+`plan().cost` estimates cost and `actual_cost()` prices reported usage. Neither
+blocks submissions when a budget is exceeded.
 
 ## Supported today
 
 | Provider | Discount | Window | Live-verified | Notes |
 |---|---|---|---|---|
 | Anthropic | 50% | none | **yes** | inline requests, no file upload |
-| Gemini AI Studio | 50% | none | pending | inline only; joins by index, see below |
+| Gemini AI Studio | 50% | none | pending | inline or file input; see joining limits below |
 | OpenAI | 50% | 24h | no | the reference lane; litellm covers it too |
 | Groq | 50% | 24h or 7d | no | model allowlist |
 | Mistral | 50% | any Nh | no | model scoped to the job, not the line |
@@ -257,8 +243,7 @@ discounts 20% rather than 50%, and its own docs exclude the flagship models.
 Azure, Vertex AI and Bedrock are unshipped because litellm already reaches
 them, so batchlane points you there instead of claiming they have no lane.
 
-With Fireworks the open-weight sweep is complete: Groq, Together, DeepInfra
-and Fireworks are all reachable, and no other package batches any of them.
+Groq, Together, DeepInfra, and Fireworks are reachable through the same interface.
 
 Self-hosted runtimes get a different answer again. Ollama, LM Studio,
 llamafile and vLLM have no batch lane because there is no per-token price to
@@ -284,29 +269,11 @@ and which endpoints the lane covers.
 
 ## Why not just use LiteLLM's `/batches`
 
-You should, for the six providers it reaches. For the rest there is no path:
-its dispatch is a hardcoded `if/elif` chain, its provider registry has one
-entry, and `litellm.CustomLLM` exposes no batch hooks, so nothing can be added
-from outside. Its `create_batch` also types `completion_window` as
-`Literal["24h"]`, which cannot express Groq's 7-day window.
-
-Two gaps are worth seeing concretely.
-
-LiteLLM can batch Gemini models through Vertex AI but not through AI Studio.
-`batches/main.py` never mentions `gemini`, and there is no
-`llms/gemini/batches/` beside the `llms/gemini/files/` that exists. So
-`vertex_ai/gemini-2.5-flash` batches and `gemini/gemini-2.5-flash` does not,
-for the same model behind the same 50% discount.
-
-It can also retrieve an Anthropic batch without being able to create one:
-
-```
->>> litellm.create_batch(custom_llm_provider="anthropic", ...)
-BadRequestError: LiteLLM doesn't support custom_llm_provider=anthropic
-for 'create_batch'
-```
-
-So bulk Claude work routed through the gateway pays full price.
+Use the interface that supports the provider and account you need. Batchlane
+provides its own provider adapters, request planning, and resumable submissions.
+It uses LiteLLM for request and response conversion; see the
+[LiteLLM batch documentation](https://docs.litellm.ai/docs/batches) for its current
+provider support.
 
 `batchlane` depends on LiteLLM the *library* and ignores LiteLLM the gateway.
 One module, `translate.py`, imports it, and calls nothing but pure synchronous
@@ -316,10 +283,10 @@ CI rather than corrupting a 50,000-row job.
 ## Install
 
 ```bash
-pip install git+https://github.com/gojiplus/batchlane
+pip install batchlane
 ```
 
-Not on PyPI yet.
+Requires Python 3.11 or newer.
 
 Credentials come from the usual environment variables (`ANTHROPIC_API_KEY`,
 `GEMINI_API_KEY`, `OPENAI_API_KEY`, `GROQ_API_KEY`, `TOGETHER_API_KEY`,

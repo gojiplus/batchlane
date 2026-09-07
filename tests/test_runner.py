@@ -287,7 +287,7 @@ def test_resume_re_reads_finished_jobs_instead_of_re_paying_for_them(
     first = [next(gen), next(gen)]
     gen.close()
 
-    assert submit.call_count == 1
+    assert submit.call_count == 2
     assert checkpoint.exists(), "the handle must be persisted before anything can fail"
 
     # Second run: same inputs, same checkpoint.
@@ -312,7 +312,7 @@ def test_the_checkpoint_records_what_was_submitted_not_the_results(groq_key, tmp
     # Two records per chunk, in this order: the intent, written before the
     # provider is called, then the receipt once it answers. The order is the
     # mechanism -- reversed, a crash mid-submit would leave no trace.
-    intent, receipt = lines[0], lines[1]
+    intent, receipt = lines[1], lines[2]
     assert set(intent) == {"chunk", "key", "at"}
     assert intent["key"].startswith("bl-")
     assert set(receipt) == {"chunk", "custom_ids", "handle"}
@@ -418,3 +418,98 @@ def test_a_split_job_says_so_because_it_changes_what_to_expect(monkeypatch):
         for i in range(5)
     ]
     assert any("3 separate provider jobs" in c for c in bl.plan(rows).caveats)
+
+
+@respx.mock
+@pytest.mark.parametrize(
+    "change", ["prompt", "params", "model", "order", "length", "window"]
+)
+def test_resume_rejects_changed_work_before_any_provider_call(
+    groq_key, tmp_path, change
+):
+    _mock_one_job(["r0", "r1"])
+    checkpoint = tmp_path / "job.jsonl"
+    list(bl.run(_lines(2), checkpoint=checkpoint, poll_interval=0))
+    changed = _lines(2)
+    kwargs = {}
+    if change == "prompt":
+        changed = _lines(2, text="different")
+    elif change == "params":
+        changed[0] = dataclasses.replace(changed[0], params={"temperature": 0.8})
+    elif change == "model":
+        changed[0] = dataclasses.replace(changed[0], model="groq/llama-3.1-8b-instant")
+    elif change == "order":
+        changed.reverse()
+    elif change == "length":
+        changed = changed[:1]
+    else:
+        kwargs["window"] = "7d"
+    calls = len(respx.calls)
+    with pytest.raises(bl.BatchlaneError, match="checkpoint"):
+        list(bl.run(changed, checkpoint=checkpoint, poll_interval=0, **kwargs))
+    assert len(respx.calls) == calls
+
+
+@respx.mock
+def test_all_chunks_are_submitted_before_polling(groq_key, tiny_caps):
+    tiny_caps(max_requests=1)
+    respx.post(f"{GROQ.base_url}/files").mock(
+        return_value=httpx.Response(200, json={"id": "f"})
+    )
+    submits = respx.post(f"{GROQ.base_url}/batches").mock(
+        side_effect=[
+            httpx.Response(200, json={"id": "b1"}),
+            httpx.Response(200, json={"id": "b2"}),
+        ]
+    )
+
+    def poll(request):
+        assert submits.call_count == 2
+        return httpx.Response(200, json={"status": "failed"})
+
+    respx.get(f"{GROQ.base_url}/batches/b1").mock(side_effect=poll)
+    respx.get(f"{GROQ.base_url}/batches/b2").mock(side_effect=poll)
+    assert len(list(bl.run(_lines(2), poll_interval=0))) == 2
+
+
+@respx.mock
+def test_submit_all_can_resume_without_polling(groq_key, tmp_path):
+    respx.post(f"{GROQ.base_url}/files").mock(
+        return_value=httpx.Response(200, json={"id": "f"})
+    )
+    submits = respx.post(f"{GROQ.base_url}/batches").mock(
+        side_effect=[
+            httpx.Response(200, json={"id": "b1"}),
+            httpx.Response(200, json={"id": "b2"}),
+        ]
+    )
+    checkpoint = tmp_path / "nested" / "job.jsonl"
+    first = bl.submit_all(_lines(3), checkpoint=checkpoint, max_requests_per_batch=2)
+    second = bl.submit_all(_lines(3), checkpoint=checkpoint, max_requests_per_batch=2)
+    assert first == second
+    assert len(first) == submits.call_count == 2
+
+
+def test_duplicate_request_ids_are_rejected():
+    with pytest.raises(bl.BatchlaneError, match="unique custom_id"):
+        bl.plan(_lines(1) * 2)
+
+
+@pytest.mark.parametrize("cap", [0, -1])
+def test_invalid_requested_chunk_cap_is_rejected(cap):
+    with pytest.raises(bl.BatchlaneError, match="positive"):
+        bl.plan(_lines(1), max_requests_per_batch=cap)
+
+
+@respx.mock
+def test_readonly_parameter_mapping_can_submit_and_resume(groq_key, tmp_path):
+    from types import MappingProxyType
+
+    _mock_one_job(["r0"])
+    lines = [
+        dataclasses.replace(_lines(1)[0], params=MappingProxyType({"temperature": 0.0}))
+    ]
+    checkpoint = tmp_path / "job.jsonl"
+    first = bl.submit_all(lines, checkpoint=checkpoint)
+    second = bl.submit_all(lines, checkpoint=checkpoint)
+    assert first == second

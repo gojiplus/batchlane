@@ -17,9 +17,8 @@ Shape notes, all of which differ from the OpenAI-compatible providers:
 * Cancel uses an RPC-style ``:cancel`` suffix, not a sub-path.
 * There is no caller-settable completion window.
 
-v1 submits **inline** requests only (a documented 20MB ceiling). File input
-needs the resumable File API upload and moves the join key to a different
-place in the payload; both are deferred.
+Requests below 20MB use inline input. Larger batches use the resumable File
+API and keyed JSONL input, up to the documented 2GB file limit.
 
 Shape verified against ai.google.dev/gemini-api/docs/batch-api. Not yet
 exercised against a live API.
@@ -32,7 +31,7 @@ from typing import TYPE_CHECKING, Any
 
 from .._http import request
 from ..capabilities import CAPABILITIES
-from ..handle import BatchHandle, JobStatus, RequestResult, State, utcnow
+from ..handle import BatchHandle, JobStatus, Lane, RequestResult, State, utcnow
 from ..translate import decode_response, encode_body
 from .base import KEY_FIELD, BatchAdapter
 
@@ -44,6 +43,9 @@ if TYPE_CHECKING:
 __all__ = ["GeminiAdapter"]
 
 BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
+UPLOAD_URL = "https://generativelanguage.googleapis.com/upload/v1beta/files"
+DOWNLOAD_URL = "https://generativelanguage.googleapis.com/download/v1beta"
+INLINE_LIMIT = 20_000_000
 
 _STATE_MAP: dict[str, State] = {
     "JOB_STATE_PENDING": "pending",
@@ -146,17 +148,29 @@ class GeminiAdapter(BatchAdapter):
         """
         self.check(lines, endpoint=endpoint, window=window)
         model = lines[0].model
+        body = self.build_batch(lines, display_name=key or "batchlane")
+        lane: Lane = "batch_inline"
+        if len(json.dumps(body).encode()) >= INLINE_LIMIT:
+            rows = body["batch"]["input_config"]["requests"]["requests"]
+            payload = "".join(
+                json.dumps({"key": row["metadata"]["key"], "request": row["request"]})
+                + "\n"
+                for row in rows
+            ).encode()
+            file_name = self._upload(payload, api_key)
+            body["batch"]["input_config"] = {"file_name": file_name}
+            lane = "batch_file"
         job = request(
             "POST",
             f"{BASE_URL}/models/{model}:batchGenerateContent",
             headers=self._headers(api_key),
-            json_body=self.build_batch(lines, display_name=key or "batchlane"),
+            json_body=body,
         ).json()
         return BatchHandle(
             provider="gemini",
             job_id=job["name"],
             endpoint=endpoint,
-            lane="batch_inline",
+            lane=lane,
             created_at=utcnow(),
             model=model,
             # Gemini's docs say inline results map to requests by array index,
@@ -169,6 +183,40 @@ class GeminiAdapter(BatchAdapter):
                 else {"keys": json.dumps([line.custom_id for line in lines])}
             ),
         )
+
+    def _upload(self, payload: bytes, api_key: str) -> str:
+        """Upload JSONL through Gemini's resumable File API.
+
+        Args:
+            payload: Encoded JSONL input.
+            api_key: Google AI Studio credential.
+
+        Returns:
+            The uploaded file resource name.
+        """
+        started = request(
+            "POST",
+            UPLOAD_URL,
+            headers={
+                **self._headers(api_key),
+                "X-Goog-Upload-Protocol": "resumable",
+                "X-Goog-Upload-Command": "start",
+                "X-Goog-Upload-Header-Content-Length": str(len(payload)),
+                "X-Goog-Upload-Header-Content-Type": "application/jsonl",
+            },
+            json_body={"file": {"display_name": "batchlane"}},
+        )
+        uploaded = request(
+            "POST",
+            started.headers["x-goog-upload-url"],
+            headers={
+                "Content-Length": str(len(payload)),
+                "X-Goog-Upload-Offset": "0",
+                "X-Goog-Upload-Command": "upload, finalize",
+            },
+            content=payload,
+        ).json()
+        return uploaded["file"]["name"]
 
     def status(self, handle: BatchHandle, *, api_key: str) -> JobStatus:
         """Poll the job.
@@ -239,6 +287,27 @@ class GeminiAdapter(BatchAdapter):
                 make an index-based join silently mislabel every row.
         """
         job = self._fetch(handle, api_key)
+        file_name = (job.get("response") or {}).get("responsesFile")
+        if file_name:
+            downloaded = request(
+                "GET",
+                f"{DOWNLOAD_URL}/{file_name}:download",
+                headers=self._headers(api_key),
+                params={"alt": "media"},
+            )
+            seen: set[str] = set()
+            for raw in downloaded.iter_lines():
+                if not raw.strip():
+                    continue
+                record = json.loads(raw)
+                key = record.get("key")
+                if not isinstance(key, str) or not key or key in seen:
+                    raise RuntimeError(
+                        "Gemini file result has a missing or duplicate key."
+                    )
+                seen.add(key)
+                yield from _join([], [record], model=handle.model or "")
+            return
         inlined = ((job.get("response") or {}).get("inlinedResponses")) or []
         if not inlined:
             raise RuntimeError(
@@ -278,15 +347,18 @@ class GeminiAdapter(BatchAdapter):
             params={"pageSize": limit},
         ).json()
         for job in page.get("operations") or page.get("batches") or []:
+            meta = job.get("metadata") or job
+            input_config = meta.get("inputConfig") or {}
+            model = str(meta.get("model") or "").removeprefix("models/") or None
             yield BatchHandle(
                 provider="gemini",
                 job_id=job["name"],
                 endpoint="chat.completions",
-                lane="batch_inline",
+                lane="batch_file" if input_config.get("fileName") else "batch_inline",
                 created_at=utcnow(),
-                model=None,
+                model=model,
                 extra={
-                    KEY_FIELD: job.get("displayName") or job.get("display_name") or ""
+                    KEY_FIELD: meta.get("displayName") or meta.get("display_name") or ""
                 },
             )
 

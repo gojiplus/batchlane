@@ -34,7 +34,15 @@ from .registry import (
     resolve_api_key,
     supported_providers,
 )
-from .runner import ChunkPlan, answer_text, map, plan, run, wait  # noqa: A004
+from .runner import (
+    ChunkPlan,
+    answer_text,
+    map,  # noqa: A004 - public API mirrors the builtin
+    plan,
+    run,
+    submit_all,
+    wait,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
@@ -66,6 +74,7 @@ __all__ = [
     "run",
     "status",
     "submit",
+    "submit_all",
     "supported_providers",
     "wait",
 ]
@@ -103,6 +112,8 @@ def submit(
     if not lines:
         raise BatchlaneError("Cannot submit an empty batch.")
 
+    if len({line.custom_id for line in lines}) != len(lines):
+        raise BatchlaneError("Each request must have a unique custom_id.")
     resolved = [adapter_for_model(line.model) for line in lines]
     providers = {provider for _adapter, provider, _bare in resolved}
     if len(providers) > 1:
