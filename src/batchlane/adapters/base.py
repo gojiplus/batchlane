@@ -203,6 +203,10 @@ class BatchAdapter(ABC):
             MixedModelBatchError: If a job-scoped provider got more than one model.
         """
         caps = self.capabilities
+        if endpoint != "responses" and any(line.input is not None for line in lines):
+            raise CapabilityNotSupportedError(
+                caps.provider, "input", "native input requires endpoint='responses'"
+            )
         if endpoint not in caps.endpoints:
             raise CapabilityNotSupportedError(
                 caps.provider,

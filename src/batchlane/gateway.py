@@ -280,12 +280,19 @@ def build_app(storage: Path | None = None, api_key: str | None = None) -> Any:
         file_id = str(payload.get("input_file_id", ""))
         path = _stored(file_id)
         try:
-            handles = _submit(path, payload.get("completion_window"))
+            handles = _submit(
+                path,
+                payload.get("completion_window"),
+                str(payload.get("endpoint", "/v1/chat/completions")),
+            )
         except BatchlaneError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         batch_id = encode_batch_id(handles, spill)
         return _batch_object(
-            batch_id, "validating", {"total": 0, "completed": 0, "failed": 0}
+            batch_id,
+            "validating",
+            {"total": 0, "completed": 0, "failed": 0},
+            handles[0].endpoint,
         )
 
     @app.get("/v1/batches/{batch_id}")
@@ -296,16 +303,20 @@ def build_app(storage: Path | None = None, api_key: str | None = None) -> Any:
             for h in handles
         ]
         status, counts = _aggregate(statuses)
-        return _batch_object(batch_id, status, counts)
+        return _batch_object(batch_id, status, counts, handles[0].endpoint)
 
     @app.post("/v1/batches/{batch_id}/cancel")
     def cancel(batch_id: str) -> dict[str, Any]:
-        for handle in _handles(batch_id):
+        handles = _handles(batch_id)
+        for handle in handles:
             get_adapter(handle.provider).cancel(
                 handle, api_key=resolve_api_key(handle.provider)
             )
         return _batch_object(
-            batch_id, "cancelling", {"total": 0, "completed": 0, "failed": 0}
+            batch_id,
+            "cancelling",
+            {"total": 0, "completed": 0, "failed": 0},
+            handles[0].endpoint,
         )
 
     @app.get("/v1/batches")
@@ -352,12 +363,15 @@ def build_app(storage: Path | None = None, api_key: str | None = None) -> Any:
     return app
 
 
-def _submit(path: Path, window: str | None) -> list[BatchHandle]:
+def _submit(
+    path: Path, window: str | None, endpoint_path: str = "/v1/chat/completions"
+) -> list[BatchHandle]:
     """Parse an uploaded JSONL and submit it to the right provider.
 
     Args:
         path: The stored input file.
         window: Requested completion window, if the client set one.
+        endpoint_path: The batch endpoint, matching every JSONL request.
 
     Returns:
         One handle per chunk.
@@ -367,19 +381,33 @@ def _submit(path: Path, window: str | None) -> list[BatchHandle]:
     """
     from .handle import BatchLine
 
+    endpoints = {
+        "/v1/chat/completions": "chat.completions",
+        "/v1/responses": "responses",
+    }
+    if endpoint_path not in endpoints:
+        raise BatchlaneError(f"Unsupported batch endpoint: {endpoint_path}")
+    endpoint = endpoints[endpoint_path]
     lines = []
     for raw in path.read_text().splitlines():
         if not raw.strip():
             continue
         record = json.loads(raw)
+        if record.get("url") != endpoint_path:
+            raise BatchlaneError("Every request URL must match the batch endpoint.")
+        if record.get("method") != "POST":
+            raise BatchlaneError("Every request method must be POST.")
         body = record.get("body") or {}
         lines.append(
             BatchLine(
                 custom_id=record.get("custom_id", f"row-{len(lines)}"),
                 model=body.get("model", ""),
                 messages=body.get("messages") or [],
+                input=body.get("input"),
                 params={
-                    k: v for k, v in body.items() if k not in ("model", "messages")
+                    k: v
+                    for k, v in body.items()
+                    if k not in ("model", "messages", "input")
                 },
             )
         )
@@ -388,22 +416,23 @@ def _submit(path: Path, window: str | None) -> list[BatchHandle]:
 
     adapter, provider, _bare = adapter_for_model(lines[0].model)
     api_key = resolve_api_key(provider)
-    chunking = plan(lines)
+    chunking = plan(lines, endpoint=endpoint)
     return [
-        adapter.submit(
-            list(chunk), endpoint="chat.completions", window=window, api_key=api_key
-        )
+        adapter.submit(list(chunk), endpoint=endpoint, window=window, api_key=api_key)
         for chunk in chunking.chunks
     ]
 
 
-def _batch_object(batch_id: str, status: str, counts: dict[str, int]) -> dict[str, Any]:
+def _batch_object(
+    batch_id: str, status: str, counts: dict[str, int], endpoint: str
+) -> dict[str, Any]:
     """Render a batch in OpenAI's shape.
 
     Args:
         batch_id: The opaque id carrying the job.
         status: OpenAI-vocabulary status.
         counts: Per-request counts.
+        endpoint: The endpoint carried by the job handle.
 
     Returns:
         The batch object.
@@ -411,7 +440,9 @@ def _batch_object(batch_id: str, status: str, counts: dict[str, int]) -> dict[st
     body: dict[str, Any] = {
         "id": batch_id,
         "object": "batch",
-        "endpoint": "/v1/chat/completions",
+        "endpoint": "/v1/responses"
+        if endpoint == "responses"
+        else "/v1/chat/completions",
         "input_file_id": "",
         "completion_window": "24h",
         "status": status,

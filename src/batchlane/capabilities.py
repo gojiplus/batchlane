@@ -22,14 +22,10 @@ InputMode = Literal["file", "inline"]
 
 CHAT = "chat.completions"
 EMBEDDINGS = "embeddings"
+RESPONSES = "responses"
 
-#: What batchlane can actually build a request body for today. `translate`
-#: builds chat-completion bodies only, so advertising any other endpoint would
-#: mean posting a chat payload to an endpoint that wants a different schema --
-#: rejected at best, silently wrong at worst. Widen this only alongside a
-#: translate path that produces the matching body; test_capabilities.py
-#: enforces that no descriptor claims more than this.
-IMPLEMENTED_ENDPOINTS = frozenset({CHAT})
+#: Endpoints with matching request encoders. Provider support is narrower.
+IMPLEMENTED_ENDPOINTS = frozenset({CHAT, RESPONSES})
 
 
 @dataclass(frozen=True, slots=True)
@@ -77,7 +73,7 @@ _OPENAI = LaneCapabilities(
     provider="openai",
     # The lane also covers embeddings and completions; batchlane does not build
     # those bodies yet, so it does not claim them. See IMPLEMENTED_ENDPOINTS.
-    endpoints=frozenset({CHAT}),
+    endpoints=frozenset({CHAT, RESPONSES}),
     model_scope="line",
     input_modes=frozenset({"file"}),
     window=WindowSpec(allowed=("24h",), default="24h"),

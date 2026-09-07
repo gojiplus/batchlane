@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING, Any
 
 from .._http import request
 from ..capabilities import CAPABILITIES
+from ..errors import BatchlaneError
 from ..handle import BatchHandle, BatchLine, JobStatus, RequestResult, State, utcnow
 from ..translate import encode_body
 from .base import KEY_FIELD, BatchAdapter
@@ -92,7 +93,7 @@ ROWS: dict[str, ProviderRow] = {
 
 _ENDPOINT_PATHS = {
     "chat.completions": "/v1/chat/completions",
-    "embeddings": "/v1/embeddings",
+    "responses": "/v1/responses",
 }
 
 
@@ -130,13 +131,29 @@ class OpenAIShapedAdapter(BatchAdapter):
 
         Returns:
             The JSONL file contents.
+
+        Raises:
+            BatchlaneError: If native Responses inputs or parameters conflict.
         """
         url = _ENDPOINT_PATHS[endpoint]
         rendered = []
         for line in lines:
-            body = encode_body(
-                self.row.provider, line.model, line.messages, dict(line.params)
-            )
+            if endpoint == "responses":
+                if line.input is None or line.messages:
+                    raise BatchlaneError(
+                        "Responses requests require input and empty messages."
+                    )
+                reserved = {"model", "input", "messages", "stream", "background"}
+                if reserved.intersection(line.params):
+                    raise BatchlaneError(
+                        "Responses params cannot override model/input/messages "
+                        "or enable stream/background."
+                    )
+                body = {"model": line.model, "input": line.input, **line.params}
+            else:
+                body = encode_body(
+                    self.row.provider, line.model, line.messages, dict(line.params)
+                )
             rendered.append(
                 json.dumps(
                     {
@@ -321,7 +338,9 @@ class OpenAIShapedAdapter(BatchAdapter):
             yield BatchHandle(
                 provider=self.row.provider,
                 job_id=job["id"],
-                endpoint=job.get("endpoint") or "chat.completions",
+                endpoint={path: name for name, path in _ENDPOINT_PATHS.items()}.get(
+                    job.get("endpoint", ""), job.get("endpoint") or "chat.completions"
+                ),
                 lane="batch_file",
                 created_at=utcnow(),
                 model=None,
@@ -370,9 +389,14 @@ def _parse_result_line(payload: dict[str, Any]) -> RequestResult:
         The result, joined on ``custom_id``.
     """
     response = payload.get("response") or {}
+    body = response.get("body") or {}
+    error = payload.get("error") or response.get("error") or body.get("error")
+    status_code = response.get("status_code")
+    if not error and isinstance(status_code, int) and status_code >= 400:
+        error = {"message": f"HTTP {status_code}"}
     return RequestResult(
         custom_id=payload.get("custom_id", ""),
         response=response.get("body"),
-        error=payload.get("error") or response.get("error"),
+        error=error,
         status_code=response.get("status_code"),
     )

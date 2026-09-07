@@ -86,6 +86,41 @@ for handle in handles:
 
 `plan(rows).chunks` describes which requests each handle covers.
 
+## OpenAI Responses batches
+
+Use native Responses `input` with `endpoint="responses"`. Leave `messages`
+empty and put other Responses parameters in `params`:
+
+```python
+import batchlane as bl
+
+lines = [
+    bl.BatchLine(
+        "page-1",
+        "openai/gpt-4o-mini",
+        input=[
+            {
+                "role": "user",
+                "content": [
+                    {"type": "input_text", "text": "Summarize this page."},
+                ],
+            }
+        ],
+        params={"max_output_tokens": 200},
+    )
+]
+handles = bl.submit_all(lines, endpoint="responses", checkpoint="responses.jsonl")
+for line, result in bl.run(lines, endpoint="responses", checkpoint="responses.jsonl"):
+    print(line.custom_id, bl.answer_text(result))
+```
+
+Inputs can include native image and file blocks. Result bodies retain native
+output items, refusals, tool calls, reasoning details, and usage; `answer_text`
+extracts only output text. This uses the [OpenAI Batch API](https://developers.openai.com/api/reference/resources/batches/methods/create).
+Streaming and background mode are not batch request modes. Other provider lanes
+continue to accept chat-completion requests. Responses input tokens and costs
+are not estimated offline; `actual_cost` can price collected usage.
+
 ## What will bite you, before it does
 
 ```python
