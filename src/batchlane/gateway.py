@@ -393,8 +393,10 @@ def _submit(
         if not raw.strip():
             continue
         record = json.loads(raw)
-        if record.get("url", endpoint_path) != endpoint_path:
+        if record.get("url") != endpoint_path:
             raise BatchlaneError("Every request URL must match the batch endpoint.")
+        if record.get("method") != "POST":
+            raise BatchlaneError("Every request method must be POST.")
         body = record.get("body") or {}
         lines.append(
             BatchLine(

@@ -430,3 +430,43 @@ async def test_stock_sdk_responses_batch_preserves_native_endpoint(client, monke
     assert finished.endpoint == "/v1/responses"
     output = await client.files.content(finished.output_file_id)
     assert json.loads(output.text)["response"]["body"] == body
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("endpoint", ["/v1/responses", "/v1/chat/completions"])
+@pytest.mark.parametrize(
+    "defect", ["missing_url", "wrong_url", "missing_method", "get"]
+)
+@respx.mock(assert_all_called=False)
+async def test_invalid_batch_rows_are_rejected_before_provider_io(
+    client, monkeypatch, endpoint, defect, respx_mock
+):
+    import openai
+
+    monkeypatch.setenv("OPENAI_API_KEY", "k")
+    respx_mock.route(host="gateway.invalid").pass_through()
+    base = ROWS["openai"].base_url
+    upload = respx_mock.post(f"{base}/files").respond(200, json={"id": "f"})
+    create = respx_mock.post(f"{base}/batches").respond(200, json={"id": "b"})
+    body = {"model": "openai/gpt-4o-mini", "max_tokens": 8}
+    if endpoint == "/v1/responses":
+        body = {"model": "openai/gpt-4o-mini", "input": "hello"}
+    else:
+        body["messages"] = [{"role": "user", "content": "hello"}]
+    row = {"custom_id": "r", "method": "POST", "url": endpoint, "body": body}
+    if defect == "missing_url":
+        del row["url"]
+    elif defect == "wrong_url":
+        row["url"] = "/v1/embeddings"
+    elif defect == "missing_method":
+        del row["method"]
+    else:
+        row["method"] = "GET"
+    stored = await client.files.create(
+        file=("input.jsonl", json.dumps(row).encode()), purpose="batch"
+    )
+    with pytest.raises(openai.BadRequestError):
+        await client.batches.create(
+            input_file_id=stored.id, endpoint=endpoint, completion_window="24h"
+        )
+    assert upload.call_count == create.call_count == 0
