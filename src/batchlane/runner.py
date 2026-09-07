@@ -17,7 +17,7 @@ import hashlib
 import json
 import os
 import time
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -455,6 +455,14 @@ def submit_all(
                     since=prior[1],
                 )
                 if handle is not None and path is not None:
+                    handle = replace(
+                        handle,
+                        model=handle.model or chunk[0].model,
+                        extra={
+                            **handle.extra,
+                            "keys": json.dumps([line.custom_id for line in chunk]),
+                        },
+                    )
                     _append_checkpoint(
                         path, index, handle, [ln.custom_id for ln in chunk]
                     )

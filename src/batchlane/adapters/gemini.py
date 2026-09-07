@@ -347,15 +347,18 @@ class GeminiAdapter(BatchAdapter):
             params={"pageSize": limit},
         ).json()
         for job in page.get("operations") or page.get("batches") or []:
+            meta = job.get("metadata") or job
+            input_config = meta.get("inputConfig") or {}
+            model = str(meta.get("model") or "").removeprefix("models/") or None
             yield BatchHandle(
                 provider="gemini",
                 job_id=job["name"],
                 endpoint="chat.completions",
-                lane="batch_inline",
+                lane="batch_file" if input_config.get("fileName") else "batch_inline",
                 created_at=utcnow(),
-                model=None,
+                model=model,
                 extra={
-                    KEY_FIELD: job.get("displayName") or job.get("display_name") or ""
+                    KEY_FIELD: meta.get("displayName") or meta.get("display_name") or ""
                 },
             )
 

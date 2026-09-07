@@ -283,3 +283,53 @@ def test_file_results_refuse_missing_or_duplicate_keys(rows):
     )
     with pytest.raises(RuntimeError, match="missing or duplicate key"):
         list(ADAPTER.results(_handle(), api_key="k"))
+
+
+@respx.mock
+@pytest.mark.parametrize("file_input", [False, True])
+def test_crash_recovery_finds_nested_label_and_restores_result_identity(
+    tmp_path, monkeypatch, file_input
+):
+    from batchlane import runner
+
+    monkeypatch.setenv("GEMINI_API_KEY", "k")
+    saved = []
+
+    def submit(request):
+        saved.append(json.loads(request.content)["batch"]["display_name"])
+        return httpx.Response(200, json={"name": "batches/paid"})
+
+    submits = respx.post(f"{BASE_URL}/models/{MODEL}:batchGenerateContent").mock(
+        side_effect=submit
+    )
+
+    def listing(request):
+        meta = {"displayName": saved[0], "model": f"models/{MODEL}"}
+        if file_input:
+            meta["inputConfig"] = {"fileName": "files/input"}
+        return httpx.Response(
+            200, json={"operations": [{"name": "batches/paid", "metadata": meta}]}
+        )
+
+    respx.get(f"{BASE_URL}/batches").mock(side_effect=listing)
+    real_append = runner._append_checkpoint
+
+    def crash(*args):
+        raise RuntimeError("stopped before receipt")
+
+    monkeypatch.setattr(runner, "_append_checkpoint", crash)
+    lines = [bl.BatchLine("r1", f"gemini/{MODEL}", [{"role": "user", "content": "hi"}])]
+    checkpoint = tmp_path / "job.jsonl"
+    with pytest.raises(RuntimeError, match="stopped"):
+        bl.submit_all(lines, checkpoint=checkpoint)
+    monkeypatch.setattr(runner, "_append_checkpoint", real_append)
+    handles = bl.submit_all(lines, checkpoint=checkpoint)
+    assert submits.call_count == 1
+    assert handles[0].model == MODEL
+    assert handles[0].lane == ("batch_file" if file_input else "batch_inline")
+    assert json.loads(handles[0].extra["keys"]) == ["r1"]
+    respx.get(f"{BASE_URL}/batches/paid").mock(
+        return_value=httpx.Response(200, json=_job([{"response": _reply("first")}]))
+    )
+    got = list(bl.results(handles[0]))
+    assert [(r.custom_id, bl.answer_text(r)) for r in got] == [("r1", "first")]
