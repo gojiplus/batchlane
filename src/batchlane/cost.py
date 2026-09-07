@@ -33,7 +33,7 @@ RateSource = Literal["published", "derived", "unknown"]
 class CostEstimate:
     """An estimate, carrying its own uncertainty."""
 
-    input_tokens: int
+    input_tokens: int | None
     output_tokens: int | None
     batch_usd: float | None
     sync_usd: float | None
@@ -65,7 +65,11 @@ class CostEstimate:
             A one-line summary, flagging a derived rate as approximate.
         """
         if self.batch_usd is None or self.sync_usd is None:
-            return f"{self.input_tokens:,} input tokens; cost not estimable"
+            return (
+                f"{self.input_tokens:,} input tokens; cost not estimable"
+                if self.input_tokens is not None
+                else "input tokens unknown; cost not estimable"
+            )
         mark = "~" if self.rate_source != "published" else ""
         if self.measured:
             bound = " (actual)"
@@ -164,6 +168,16 @@ def estimate_cost(
     """
     import litellm
 
+    if any(line.input is not None for line in lines):
+        return CostEstimate(
+            None,
+            None,
+            None,
+            None,
+            "unknown",
+            "Native Responses inputs are not token-counted offline; "
+            "use actual_cost on collected results.",
+        )
     input_tokens = 0
     for line in lines:
         try:
@@ -175,7 +189,10 @@ def estimate_cost(
 
     # Output length is not knowable in advance. max_tokens makes it an upper
     # bound; without one, only the input side can honestly be priced.
-    per_line = [line.params.get("max_tokens") for line in lines]
+    per_line = [
+        line.params.get("max_completion_tokens", line.params.get("max_tokens"))
+        for line in lines
+    ]
     output_tokens = (
         sum(v for v in per_line if isinstance(v, int))
         if per_line and all(isinstance(v, int) for v in per_line)

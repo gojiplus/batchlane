@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-09-07
+
+- Add native OpenAI Responses batches to the Python API and gateway, preserving image/file inputs, reasoning parameters, tool outputs, refusals, and usage.
+- Validate endpoints before payload conversion and retain Responses endpoints when recovering listed jobs.
+- Include native inputs in checkpoint identity, extract Responses output text, and report unknown offline Responses costs explicitly.
+- Respect `max_completion_tokens` in chat cost estimates and surface HTTP result errors.
+
+
 ## 0.1.0 — 2026-09-07
 
 Initial PyPI release.

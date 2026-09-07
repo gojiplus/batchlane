@@ -38,8 +38,10 @@ class BatchLine:
 
     custom_id: str
     model: str
-    messages: list[dict[str, Any]]
+    messages: list[dict[str, Any]] = field(default_factory=list)
     params: Mapping[str, Any] = field(default_factory=dict)
+    #: Native Responses input, used with empty messages and endpoint="responses".
+    input: str | list[dict[str, Any]] | None = None
 
 
 @dataclass(frozen=True, slots=True)

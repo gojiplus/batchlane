@@ -22,7 +22,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from .errors import BatchlaneError
+from .errors import BatchlaneError, CapabilityNotSupportedError
 from .handle import BatchHandle, BatchLine, RequestResult
 from .registry import adapter_for_model, resolve_api_key
 
@@ -58,12 +58,15 @@ def _line_identity(line: BatchLine) -> dict[str, object]:
     Returns:
         JSON-compatible request fields.
     """
-    return {
+    identity: dict[str, object] = {
         "custom_id": line.custom_id,
         "model": line.model,
         "messages": line.messages,
         "params": dict(line.params),
     }
+    if line.input is not None:
+        identity["input"] = line.input
+    return identity
 
 
 def _chunk_key(lines: Sequence[BatchLine], index: int) -> str:
@@ -178,8 +181,6 @@ def _prepare(
     Raises:
         BatchlaneError: If ``lines`` is empty or spans multiple providers.
     """
-    from .handle import BatchLine as _BatchLine
-
     if not lines:
         raise BatchlaneError("Cannot submit an empty batch.")
     if len({line.custom_id for line in lines}) != len(lines):
@@ -193,7 +194,7 @@ def _prepare(
         )
     adapter, provider, _bare = resolved[0]
     bare_lines = [
-        _BatchLine(line.custom_id, bare, line.messages, line.params)
+        replace(line, model=bare)
         for line, (_a, _p, bare) in zip(lines, resolved, strict=True)
     ]
     return adapter, provider, bare_lines
@@ -221,9 +222,18 @@ def plan(
 
     Raises:
         BatchlaneError: If a single line is too large to submit on its own.
+        CapabilityNotSupportedError: If the lane cannot encode the requested endpoint.
     """
     adapter, provider, bare = _prepare(lines)
     caps = adapter.capabilities
+    if endpoint not in caps.endpoints:
+        raise CapabilityNotSupportedError(
+            provider, endpoint, f"lane supports {sorted(caps.endpoints)}"
+        )
+    if endpoint != "responses" and any(line.input is not None for line in bare):
+        raise CapabilityNotSupportedError(
+            provider, "input", "native input requires endpoint='responses'"
+        )
 
     sizes = [adapter.payload_bytes([line], endpoint=endpoint) for line in bare]
     budget = int(caps.max_input_bytes * _SAFETY) if caps.max_input_bytes else None
@@ -603,8 +613,8 @@ def _pairs(
 def answer_text(result: RequestResult) -> str | None:
     """Pull the assistant's text out of a result, if there is one.
 
-    Every adapter normalizes to OpenAI chat-completion shape, so one accessor
-    works across providers.
+    Reads chat-completion content or Responses output-text blocks. Raw tool
+    calls, refusals, reasoning, and usage remain available in the result body.
 
     Args:
         result: One row's outcome.
@@ -614,6 +624,15 @@ def answer_text(result: RequestResult) -> str | None:
     """
     if not result.ok or not isinstance(result.response, dict):
         return None
+    if "output" in result.response:
+        texts = [
+            block["text"]
+            for item in result.response.get("output") or []
+            if item.get("type") == "message"
+            for block in item.get("content") or []
+            if block.get("type") == "output_text" and isinstance(block.get("text"), str)
+        ]
+        return "".join(texts) if texts else None
     choices = result.response.get("choices") or []
     if not choices:
         return None

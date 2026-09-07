@@ -16,6 +16,7 @@ Example:
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import TYPE_CHECKING
 
 from .capabilities import CAPABILITIES, LaneCapabilities, capabilities_for
@@ -125,7 +126,7 @@ def submit(
     adapter, provider, _bare = resolved[0]
     # Adapters work in bare model names; the provider prefix is ours, not theirs.
     bare_lines = [
-        BatchLine(line.custom_id, bare, line.messages, line.params)
+        replace(line, model=bare)
         for line, (_a, _p, bare) in zip(lines, resolved, strict=True)
     ]
     return adapter.submit(
