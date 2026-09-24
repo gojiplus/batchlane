@@ -5,7 +5,7 @@ readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
 authors = [{ name = "Gaurav Sood", email = "contact@gsood.com" }]
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 version = "0.2.0"
 keywords = ["llm", "batch", "inference", "litellm", "groq", "gemini", "mistral"]
 classifiers = [
@@ -18,7 +18,8 @@ dependencies = [
     # transforms are pure, synchronous, and maintained against provider drift.
     # Pinned to a floor because they are internal API, not published surface --
     # tests/test_translate.py pins their output so a bump fails loudly.
-    "litellm>=1.80.10",
+    # Older releases can admit OpenAI 3 by downgrading to vulnerable LiteLLM.
+    "litellm>=1.99.0",
     "httpx>=0.27",
     # Retry/backoff only. litellm's own AsyncHTTPHandler exists to feed its
     # cost-logging pipeline, which this package deliberately excludes.
@@ -59,7 +60,7 @@ docs = ["sphinx>=8", "furo", "myst-parser", "sphinx-copybutton", "py-canon @ git
 
 [tool.ruff]
 line-length = 88
-target-version = "py311"
+target-version = "py312"
 
 [tool.ruff.lint]
 external = ["DOC"]
@@ -96,7 +97,13 @@ typeCheckingMode = "standard"
 testpaths = ["tests"]
 minversion = "8"
 xfail_strict = true
-filterwarnings = ["error"]
+log_level = "INFO"
+filterwarnings = [
+    "error",
+    # LiteLLM's reasoning TypedDict has a static-only ReadOnly annotation.
+    # Response decoding does not depend on Pydantic enforcing its immutability.
+    "ignore:Item 'summary' on TypedDict class 'ChatCompletionReasoningItem' is using the `ReadOnly` qualifier:UserWarning:pydantic[.]_internal[.]_generate_schema",
+]
 addopts = ["--strict-config", "--strict-markers", "-ra"]
 markers = ["live: hits real provider APIs; needs keys and BATCHLANE_LIVE=1"]
 

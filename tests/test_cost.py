@@ -6,6 +6,38 @@ import batchlane as bl
 from batchlane.capabilities import CAPABILITIES
 
 
+@pytest.fixture(autouse=True)
+def _fixed_model_prices(monkeypatch):
+    """Keep arithmetic tests independent of the online model registry."""
+    import litellm
+
+    prices = {
+        "openai/gpt-4o-mini": {
+            "input_cost_per_token": 1.5e-7,
+            "output_cost_per_token": 6e-7,
+            "input_cost_per_token_batches": 7.5e-8,
+            "output_cost_per_token_batches": 3e-7,
+        },
+        "groq/llama-3.3-70b-versatile": {
+            "input_cost_per_token": 5.9e-7,
+            "output_cost_per_token": 7.9e-7,
+        },
+        "together_ai/meta-llama/Llama-3.3-70B-Instruct-Turbo": {
+            "input_cost_per_token": 8.8e-7,
+            "output_cost_per_token": 8.8e-7,
+        },
+        "anthropic/claude-haiku-4-5-20251001": {
+            "input_cost_per_token": 1e-6,
+            "output_cost_per_token": 5e-6,
+        },
+    }
+    for model, rates in prices.items():
+        provider, bare = model.split("/", 1)
+        info = {"litellm_provider": provider, "mode": "chat", **rates}
+        monkeypatch.setitem(litellm.model_cost, model, info)
+        monkeypatch.setitem(litellm.model_cost, bare, info)
+
+
 def _rows(model, n=10, max_tokens=None, text="hello world"):
     params = {"max_tokens": max_tokens} if max_tokens is not None else {}
     return [
