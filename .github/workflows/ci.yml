@@ -25,4 +25,3 @@ jobs:
       wheel-import: batchlane
       coverage-floor: 90
       run-preen: true
-      python-versions: '["3.11", "3.12", "3.13", "3.14"]'
