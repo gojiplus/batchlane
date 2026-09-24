@@ -321,7 +321,7 @@ CI rather than corrupting a 50,000-row job.
 pip install batchlane
 ```
 
-Requires Python 3.11 or newer.
+Requires Python 3.12 or newer.
 
 Credentials come from the usual environment variables (`ANTHROPIC_API_KEY`,
 `GEMINI_API_KEY`, `OPENAI_API_KEY`, `GROQ_API_KEY`, `TOGETHER_API_KEY`,
