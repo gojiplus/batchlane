@@ -1,5 +1,8 @@
 """Cost estimation, including how much of the estimate is actually known."""
 
+import os
+from unittest.mock import Mock, call
+
 import pytest
 
 import batchlane as bl
@@ -7,10 +10,11 @@ from batchlane.capabilities import CAPABILITIES
 
 
 @pytest.fixture(autouse=True)
-def _fixed_model_prices(monkeypatch):
-    """Keep arithmetic tests independent of the online model registry."""
+def _fixed_cost_inputs(monkeypatch):
+    """Keep arithmetic independent of tokenizer downloads and online prices."""
     import litellm
 
+    monkeypatch.setattr(litellm, "token_counter", Mock(return_value=7))
     prices = {
         "openai/gpt-4o-mini": {
             "input_cost_per_token": 1.5e-7,
@@ -57,9 +61,11 @@ def test_a_published_batch_rate_is_used_verbatim():
 
     assert est.rate_source == "published"
     assert est.caveat is None
+    assert est.input_tokens == 35
+    assert est.output_tokens == 100
     expected = (
-        est.input_tokens * info["input_cost_per_token_batches"]
-        + est.output_tokens * info["output_cost_per_token_batches"]
+        35 * info["input_cost_per_token_batches"]
+        + 100 * info["output_cost_per_token_batches"]
     )
     assert est.batch_usd == pytest.approx(expected)
 
@@ -76,8 +82,10 @@ def test_a_derived_rate_is_exactly_the_documented_discount_off_sync():
     est = bl.plan(rows).cost
 
     assert est.rate_source == "derived"
-    expected = est.input_tokens * info["input_cost_per_token"] * (1 - discount) + (
-        est.output_tokens * info["output_cost_per_token"] * (1 - discount)
+    assert est.input_tokens == 35
+    assert est.output_tokens == 100
+    expected = 35 * info["input_cost_per_token"] * (1 - discount) + (
+        100 * info["output_cost_per_token"] * (1 - discount)
     )
     assert est.batch_usd == pytest.approx(expected)
     assert est.sync_usd == pytest.approx(est.batch_usd / (1 - discount))
@@ -103,6 +111,83 @@ def test_a_lane_whose_saving_varies_by_model_claims_none():
     assert est.rate_source == "unknown"
     assert est.saving_usd == 0
     assert "varies by model" in est.caveat
+
+
+@pytest.mark.parametrize(
+    "model",
+    [
+        "openai/gpt-4o-mini",
+        "groq/llama-3.3-70b-versatile",
+        "together_ai/meta-llama/Llama-3.3-70B-Instruct-Turbo",
+        "anthropic/claude-haiku-4-5-20251001",
+    ],
+)
+def test_cost_arithmetic_needs_neither_tokenizers_nor_symlinks(
+    model, monkeypatch, tmp_path
+):
+    import litellm.utils
+    from huggingface_hub import constants
+
+    monkeypatch.setenv("HF_HUB_CACHE", str(tmp_path / "huggingface"))
+    monkeypatch.setattr(constants, "HF_HUB_CACHE", str(tmp_path / "huggingface"))
+    monkeypatch.setenv("TIKTOKEN_CACHE_DIR", str(tmp_path / "tiktoken"))
+    denied = PermissionError("A required privilege is not held by the client")
+    denied.winerror = 1314
+    symlink = Mock(side_effect=denied)
+    tokenizer = Mock(side_effect=AssertionError("real tokenizer used in arithmetic"))
+    monkeypatch.setattr(os, "symlink", symlink)
+    monkeypatch.setattr(litellm.utils, "_select_tokenizer", tokenizer)
+
+    with pytest.raises(PermissionError) as exc:
+        (tmp_path / "link").symlink_to(tmp_path / "source")
+    assert exc.value.winerror == 1314
+    symlink.reset_mock()
+
+    est = bl.plan(_rows(model, n=2, max_tokens=10)).cost
+
+    # estimate_cost catches tokenizer exceptions, so raising alone cannot guard
+    # against an accidental download being hidden by its character-count fallback.
+    tokenizer.assert_not_called()
+    symlink.assert_not_called()
+    assert est.input_tokens == 14
+    assert est.output_tokens == 20
+    assert not list(tmp_path.iterdir())
+
+
+@pytest.mark.parametrize(
+    "error", [RuntimeError("unavailable"), PermissionError("denied")]
+)
+def test_tokenizer_failure_prices_the_character_count_fallback(monkeypatch, error):
+    import litellm
+
+    counter = Mock(side_effect=error)
+    monkeypatch.setattr(litellm, "token_counter", counter)
+    rows = _rows("openai/gpt-4o-mini", n=2, max_tokens=5, text="twelve chars")
+    rows[0].messages.append({"role": "system", "content": "be terse"})
+
+    est = bl.plan(rows).cost
+
+    assert counter.call_args_list == [
+        call(model="gpt-4o-mini", messages=row.messages) for row in rows
+    ]
+    assert est.input_tokens == 8
+    assert est.output_tokens == 10
+    assert est.batch_usd == pytest.approx(8 * 7.5e-8 + 10 * 3e-7)
+    assert est.sync_usd == pytest.approx(8 * 1.5e-7 + 10 * 6e-7)
+
+
+def test_tokenizer_failure_does_not_replace_successful_counts(monkeypatch):
+    import litellm
+
+    counter = Mock(side_effect=[11, RuntimeError("unavailable"), 17])
+    monkeypatch.setattr(litellm, "token_counter", counter)
+
+    est = bl.plan(_rows("openai/gpt-4o-mini", n=3, text="twelve chars")).cost
+
+    assert counter.call_count == 3
+    assert est.input_tokens == 31
+    assert est.output_tokens is None
+    assert est.batch_usd == pytest.approx(31 * 7.5e-8)
 
 
 def test_without_max_tokens_only_the_input_side_is_priced():

@@ -13,6 +13,7 @@ job.
 from __future__ import annotations
 
 from copy import deepcopy
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, cast
 
 from .errors import BatchlaneError
@@ -192,7 +193,7 @@ def decode_response(provider: str, bare_model: str, payload: dict[str, Any]) -> 
         messages=[],
         stream=False,
         call_type="completion",
-        start_time=None,
+        start_time=datetime.now(UTC),
         litellm_call_id="batchlane",
         function_id="batchlane",
     )

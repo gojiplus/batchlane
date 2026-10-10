@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+- Isolate cost arithmetic tests from tokenizer downloads and Windows symlink privileges; run CI on Windows and Linux.
+- Support LiteLLM 1.103.2's required logging timestamp when decoding batch responses.
+
 ## [0.2.0] - 2026-09-07
 
 - Add native OpenAI Responses batches to the Python API and gateway, preserving image/file inputs, reasoning parameters, tool outputs, refusals, and usage.

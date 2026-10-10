@@ -22,6 +22,8 @@ jobs:
   ci:
     uses: gojiplus/py-canon/.github/workflows/reusable-ci.yml@v1
     with:
+      os: '["ubuntu-latest", "windows-latest"]'
+      python-versions: '["3.12", "3.14"]'
       wheel-import: batchlane
       coverage-floor: 90
       run-preen: true
