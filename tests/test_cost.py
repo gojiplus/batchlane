@@ -10,10 +10,11 @@ from batchlane.capabilities import CAPABILITIES
 
 
 @pytest.fixture(autouse=True)
-def _fixed_model_prices(monkeypatch):
-    """Keep arithmetic tests independent of the online model registry."""
+def _fixed_cost_inputs(monkeypatch):
+    """Keep arithmetic independent of tokenizer downloads and online prices."""
     import litellm
 
+    monkeypatch.setattr(litellm, "token_counter", Mock(return_value=7))
     prices = {
         "openai/gpt-4o-mini": {
             "input_cost_per_token": 1.5e-7,
@@ -60,9 +61,11 @@ def test_a_published_batch_rate_is_used_verbatim():
 
     assert est.rate_source == "published"
     assert est.caveat is None
+    assert est.input_tokens == 35
+    assert est.output_tokens == 100
     expected = (
-        est.input_tokens * info["input_cost_per_token_batches"]
-        + est.output_tokens * info["output_cost_per_token_batches"]
+        35 * info["input_cost_per_token_batches"]
+        + 100 * info["output_cost_per_token_batches"]
     )
     assert est.batch_usd == pytest.approx(expected)
 
@@ -79,8 +82,10 @@ def test_a_derived_rate_is_exactly_the_documented_discount_off_sync():
     est = bl.plan(rows).cost
 
     assert est.rate_source == "derived"
-    expected = est.input_tokens * info["input_cost_per_token"] * (1 - discount) + (
-        est.output_tokens * info["output_cost_per_token"] * (1 - discount)
+    assert est.input_tokens == 35
+    assert est.output_tokens == 100
+    expected = 35 * info["input_cost_per_token"] * (1 - discount) + (
+        100 * info["output_cost_per_token"] * (1 - discount)
     )
     assert est.batch_usd == pytest.approx(expected)
     assert est.sync_usd == pytest.approx(est.batch_usd / (1 - discount))
