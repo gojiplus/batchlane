@@ -111,7 +111,10 @@ markers = ["live: hits real provider APIs; needs keys and BATCHLANE_LIVE=1"]
 source = ["src"]
 
 [tool.codespell]
-# "trough" is the demand trough in a GPU fleet's utilisation curve -- the
+builtin = "clear,rare,en-GB_to_en-US"
+# Provider status values retain their API spelling.
+ignore-regex = '''["'`](?i:cancelled|cancelling)["'`]'''  # codespell:ignore cancelled,cancelling
+# "trough" is the demand trough in a GPU fleet's utilization curve -- the
 # reason batch discounts exist at all -- not a misspelling of "through".
 ignore-words-list = "trough"
 

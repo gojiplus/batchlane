@@ -151,6 +151,7 @@ def test_results_are_matched_to_rows_by_content_not_by_count(provider, model, en
     distinct = {
         "capital": ("What is the capital of France? One word.", "paris"),
         "arith": ("What is 40 plus 2? Digits only.", "42"),
+        # codespell:ignore-next-line colour
         "color": ("What colour is a ripe banana? One word.", "yellow"),
     }
     lines = [

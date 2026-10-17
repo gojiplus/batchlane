@@ -241,7 +241,7 @@ async def test_a_traversing_input_file_id_cannot_read_outside_the_store(
 ):
     """The worst of the two: it was arbitrary file read plus exfiltration.
 
-    input_file_id arrives in a JSON body, which the router does not normalise
+    input_file_id arrives in a JSON body, which the router does not normalize
     the way it does a path segment. Before the fix this read ../../outside.jsonl,
     parsed it, and got as far as uploading its contents to Groq.
     """
@@ -364,12 +364,12 @@ async def test_without_a_key_every_route_is_open_and_with_one_none_are(
     with pytest.raises(openai.AuthenticationError):
         await anon.batches.list()
 
-    authorised = openai.AsyncOpenAI(
+    authorized = openai.AsyncOpenAI(
         base_url="http://gateway.invalid/v1",
         api_key="s3cret",
         http_client=httpx.AsyncClient(transport=transport),
     )
-    assert (await authorised.batches.list()).data == []
+    assert (await authorized.batches.list()).data == []
 
 
 def test_serving_beyond_loopback_without_a_key_is_refused(monkeypatch, capsys):

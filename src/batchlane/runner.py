@@ -73,7 +73,7 @@ def _chunk_key(lines: Sequence[BatchLine], index: int) -> str:
     """Derive a stable submission key from a chunk's content.
 
     Deterministic, so resubmitting the same work produces the same key and a
-    job left behind by a crash can be recognised. No provider offers an
+    job left behind by a crash can be recognized. No provider offers an
     idempotency key for batch, so this is the client-side stand-in.
 
     Args:
@@ -575,7 +575,7 @@ def _pairs(
         api_key: Credential for this provider.
 
     Yields:
-        tuple[BatchLine, RequestResult]: pairs, including a synthesised
+        tuple[BatchLine, RequestResult]: pairs, including a synthesized
             error for any row the provider never answered -- silence is not
             success.
 

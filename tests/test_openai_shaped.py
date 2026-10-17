@@ -218,7 +218,7 @@ def test_a_lane_with_no_counts_still_reports_progress():
     """Together publishes a percentage and no counts at all.
 
     Discarding it left a running job indistinguishable from a stalled one, so
-    the percentage is carried through and normalised to the same 0..1 scale
+    the percentage is carried through and normalized to the same 0..1 scale
     the counted lanes produce.
     """
     together = OpenAIShapedAdapter(ROWS["together_ai"])

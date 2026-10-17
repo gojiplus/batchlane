@@ -175,7 +175,7 @@ class GeminiAdapter(BatchAdapter):
             model=model,
             # Gemini's docs say inline results map to requests by array index,
             # not by the key we supply. Carry the submitted order on the handle
-            # so results can still be labelled after a cold start, and so an
+            # so results can still be labeled after a cold start, and so an
             # index join is at least checkable against a known length.
             extra=(
                 {"keys": json.dumps([line.custom_id for line in lines]), KEY_FIELD: key}
@@ -278,7 +278,7 @@ class GeminiAdapter(BatchAdapter):
             api_key: Google AI Studio API key.
 
         Yields:
-            RequestResult: One result per line, labelled with the submitted
+            RequestResult: One result per line, labeled with the submitted
                 ``custom_id``.
 
         Raises:
@@ -393,7 +393,7 @@ def _join(
         model: The model the batch ran against, for decoding.
 
     Yields:
-        RequestResult: One labelled result per entry.
+        RequestResult: One labeled result per entry.
 
     Raises:
         RuntimeError: If no key is echoed and the counts disagree, so an index
@@ -404,7 +404,7 @@ def _join(
         pairs = zip(keys, inlined, strict=True)
     else:
         # Falling back to position. Only safe if the provider returned exactly
-        # what we sent; otherwise every row would be labelled with someone
+        # what we sent; otherwise every row would be labeled with someone
         # else's answer and nothing would look wrong.
         if len(submitted) != len(inlined):
             raise RuntimeError(
