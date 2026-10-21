@@ -44,7 +44,7 @@ BATCH_PREFIX = "batch_bl"
 
 #: Ids this gateway issues, and therefore the only ones it will read back. Both
 #: are checked against the pattern *and* for containment after resolution:
-#: identifiers arriving in a JSON body are not normalised by the router the way
+#: identifiers arriving in a JSON body are not normalized by the router the way
 #: a path segment is, so a body field alone could otherwise walk out of the
 #: store and have its contents shipped to a provider.
 _FILE_ID = re.compile(r"file-[0-9a-f]{24}\Z")

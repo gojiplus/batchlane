@@ -240,7 +240,7 @@ class AnthropicAdapter(BatchAdapter):
         """Normalize an Anthropic batch object.
 
         ``processing_status`` alone is not enough: ``ended`` covers a job that
-        succeeded, one that was cancelled and one that expired. The counts
+        succeeded, one that was canceled and one that expired. The counts
         disambiguate, so they are what this reads.
 
         Args:

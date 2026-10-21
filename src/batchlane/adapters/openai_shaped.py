@@ -270,7 +270,7 @@ class OpenAIShapedAdapter(BatchAdapter):
         counts = job.get(self.row.counts_key) or {} if self.row.counts_key else {}
         # Together publishes no counts at all, only a percentage. Dropping it
         # left a running job looking frozen, so it is carried through here and
-        # normalised to the same 0..1 scale the counts produce.
+        # normalized to the same 0..1 scale the counts produce.
         percent = job.get("progress")
         progress = (
             max(0.0, min(float(percent) / 100.0, 1.0))
