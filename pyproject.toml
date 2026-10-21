@@ -100,9 +100,14 @@ xfail_strict = true
 log_level = "INFO"
 filterwarnings = [
     "error",
-    # LiteLLM's reasoning TypedDict has a static-only ReadOnly annotation.
+    # LiteLLM's TypedDicts have static-only ReadOnly annotations.
     # Response decoding does not depend on Pydantic enforcing its immutability.
     "ignore:Item 'summary' on TypedDict class 'ChatCompletionReasoningItem' is using the `ReadOnly` qualifier:UserWarning:pydantic[.]_internal[.]_generate_schema",
+    "ignore:Item 'index' on TypedDict class 'ChatCompletion(Redacted)?ThinkingBlock' is using the `ReadOnly` qualifier:UserWarning:pydantic[.]_internal[.]_generate_schema",
+    "ignore:Items 'displayName', 'name' on TypedDict class '_CachedContentItem' are using the `ReadOnly` qualifier:UserWarning:pydantic[.]_internal[.]_generate_schema",
+    "ignore:Items 'cachedContents', 'nextPageToken' on TypedDict class '_CachedContentListBody' are using the `ReadOnly` qualifier:UserWarning:pydantic[.]_internal[.]_generate_schema",
+    "ignore:Item 'totalTokenCount' on TypedDict class '_CachedContentUsageMetadata' is using the `ReadOnly` qualifier:UserWarning:pydantic[.]_internal[.]_generate_schema",
+    "ignore:Items 'name', 'usageMetadata' on TypedDict class '_CreatedCachedContent' are using the `ReadOnly` qualifier:UserWarning:pydantic[.]_internal[.]_generate_schema",
 ]
 addopts = ["--strict-config", "--strict-markers", "-ra"]
 markers = ["live: hits real provider APIs; needs keys and BATCHLANE_LIVE=1"]
