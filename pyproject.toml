@@ -43,6 +43,11 @@ batchlane = "batchlane.cli:main"
 requires = ["uv_build>=0.12.5,<0.14"]
 build-backend = "uv_build"
 
+[tool.uv]
+# LiteLLM caps filelock below 4, but the security fixes require 4.2.1.
+# Remove this override when LiteLLM permits a patched version.
+override-dependencies = ["filelock>=4.2.1,<5"]
+
 [tool.uv.build-backend]
 module-name = "batchlane"
 
