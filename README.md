@@ -1,4 +1,4 @@
-# batchlane
+# batchlane: one interface for asynchronous LLM batches
 
 Submit asynchronous LLM batch jobs through one interface.
 
