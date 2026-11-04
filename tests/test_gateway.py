@@ -261,6 +261,7 @@ async def test_a_traversing_input_file_id_cannot_read_outside_the_store(
                 completion_window="24h",
             )
         assert "issued" in str(exc.value)
+        assert "issued" in exc.value.response.json()["error"]["message"]
     # Nothing may have reached a provider.
     assert not [c for c in respx.calls if "groq" in str(c.request.url)]
 
@@ -361,7 +362,7 @@ async def test_without_a_key_every_route_is_open_and_with_one_none_are(
         api_key="wrong",
         http_client=httpx.AsyncClient(transport=transport),
     )
-    with pytest.raises(openai.AuthenticationError):
+    with pytest.raises(openai.AuthenticationError, match="Invalid API key"):
         await anon.batches.list()
 
     authorized = openai.AsyncOpenAI(
