@@ -215,7 +215,7 @@ def build_app(storage: Path | None = None, api_key: str | None = None) -> Any:
             HTTPException,
             UploadFile,
         )
-        from fastapi.responses import PlainTextResponse
+        from fastapi.responses import JSONResponse, PlainTextResponse
     except ImportError as exc:  # pragma: no cover - exercised by install shape
         raise BatchlaneError(
             "The gateway needs the optional server extras. Install with "
@@ -250,6 +250,23 @@ def build_app(storage: Path | None = None, api_key: str | None = None) -> Any:
         description="OpenAI-compatible batch gateway",
         dependencies=[Depends(guard)],
     )
+
+    @app.exception_handler(HTTPException)
+    async def api_error(_request: Any, exc: HTTPException) -> JSONResponse:
+        """Return gateway errors in the envelope the OpenAI SDK reads.
+
+        Args:
+            _request: The failed request.
+            exc: The gateway's HTTP error.
+
+        Returns:
+            An error response preserving its status and headers.
+        """
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={"error": {"message": str(exc.detail)}},
+            headers=exc.headers,
+        )
 
     @app.post("/v1/files")
     def upload(
