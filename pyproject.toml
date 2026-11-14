@@ -105,9 +105,9 @@ xfail_strict = true
 log_level = "INFO"
 filterwarnings = [
     "error",
-    # LiteLLM's TypedDicts have static-only ReadOnly annotations.
-    # Response decoding does not depend on Pydantic enforcing its immutability.
-    "ignore:Item 'summary' on TypedDict class 'ChatCompletionReasoningItem' is using the `ReadOnly` qualifier:UserWarning:pydantic[.]_internal[.]_generate_schema",
+    # LiteLLM's TypedDicts have static-only ReadOnly annotations, and each release adds more.
+    # Response decoding does not depend on Pydantic enforcing their immutability.
+    "ignore:.*using the `ReadOnly` qualifier:UserWarning:pydantic[.]_internal[.]_generate_schema",
     "ignore:Item 'index' on TypedDict class 'ChatCompletion(Redacted)?ThinkingBlock' is using the `ReadOnly` qualifier:UserWarning:pydantic[.]_internal[.]_generate_schema",
     "ignore:Items 'displayName', 'name' on TypedDict class '_CachedContentItem' are using the `ReadOnly` qualifier:UserWarning:pydantic[.]_internal[.]_generate_schema",
     "ignore:Items 'cachedContents', 'nextPageToken' on TypedDict class '_CachedContentListBody' are using the `ReadOnly` qualifier:UserWarning:pydantic[.]_internal[.]_generate_schema",
