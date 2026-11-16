@@ -1,0 +1,18 @@
+# Patterns are written without a scheme: preen's links check scans this file
+# too, and a pattern with one would be extracted and checked as a link.
+exclude = [
+  # Not documentation links: these are provider API bases and endpoints,
+  # which correctly answer 404 or 401 to the bare GET a link checker makes.
+  '//api\.openai\.com/',
+  '//api\.groq\.com/',
+  '//api\.together\.ai/',
+  '//api\.together\.xyz/',
+  '//api\.deepinfra\.com/',
+  '//api\.anthropic\.com/',
+  '//generativelanguage\.googleapis\.com/',
+  '//api\.mistral\.ai/',
+  '//api\.fireworks\.ai/',
+  # A placeholder host on an httpx.Request built only to satisfy litellm's
+  # response-transform signature; it is never sent anywhere.
+  '//batchlane\.local/',
+]
